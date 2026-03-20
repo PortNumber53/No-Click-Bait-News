@@ -30,10 +30,10 @@ def get_feed(
     if not has_premium:
         query = query.filter(Article.is_premium.is_(False))
 
-    total = query.count()
     offset = (page - 1) * page_size
-    articles = query.offset(offset).limit(page_size).all()
-    has_more = offset + page_size < total
+    articles = query.offset(offset).limit(page_size + 1).all()
+    has_more = len(articles) > page_size
+    articles = articles[:page_size]
 
     return ArticleFeedResponse(
         articles=[ArticleResponse.model_validate(a) for a in articles],

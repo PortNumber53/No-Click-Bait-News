@@ -38,17 +38,7 @@ def register(data: UserCreate, db: Session = Depends(get_db)):
     db.refresh(user)
 
     token = create_access_token(user.id)
-    tier_name = user.subscription.tier.name if user.subscription else "free"
-    return TokenResponse(
-        access_token=token,
-        user=UserResponse(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            created_at=user.created_at,
-            subscription_tier=tier_name,
-        ),
-    )
+    return _build_token_response(token, user)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -58,7 +48,10 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token(user.id)
-    tier_name = user.subscription.tier.name if user.subscription else "free"
+    return _build_token_response(token, user)
+
+
+def _build_token_response(token: str, user: User) -> TokenResponse:
     return TokenResponse(
         access_token=token,
         user=UserResponse(
@@ -66,6 +59,6 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
             email=user.email,
             name=user.name,
             created_at=user.created_at,
-            subscription_tier=tier_name,
+            subscription_tier=user.tier_name,
         ),
     )
