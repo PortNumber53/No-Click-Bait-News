@@ -1,6 +1,7 @@
 const API_BACKEND = 'http://localhost:21011';
 
 interface AppEnv extends Env {
+  ASSETS: Fetcher;
   BACKEND_ORIGIN?: string;
 }
 
@@ -8,8 +9,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Only handle API routes — static assets and SPA fallback
-    // are handled by Workers Static Assets (configured in wrangler.jsonc)
+    // Proxy API and webhook routes to the Go backend
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhook/')) {
       const backendOrigin = env.BACKEND_ORIGIN || API_BACKEND;
       const backendUrl = new URL(url.pathname + url.search, backendOrigin);
@@ -23,7 +23,7 @@ export default {
       });
     }
 
-    // For non-API routes, return nothing — the assets platform serves static files
-    return new Response('Not Found', { status: 404 });
+    // Everything else: serve static assets (SPA fallback configured in wrangler.jsonc)
+    return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<AppEnv>;
