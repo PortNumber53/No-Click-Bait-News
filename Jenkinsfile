@@ -105,7 +105,7 @@ BIN_LOCAL="artifacts/api-ncbnews-backend-linux-amd64"
 scp "$BIN_LOCAL" grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend
 
 # Generate systemd unit file
-bash deploy/generate-api-ncbnews-backend-service.sh "${TARGET_DIR}" api-ncbnews-backend.service
+bash deploy/generate-ncbnews-backend-service.sh "${TARGET_DIR}" api-ncbnews-backend.service
 
 # Upload unit file
 scp api-ncbnews-backend.service grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend.service
