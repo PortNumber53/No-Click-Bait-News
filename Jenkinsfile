@@ -97,12 +97,12 @@ pipeline {
       steps {
         unstash "bin-amd64"
         sshagent(credentials: [env.SSH_CREDENTIALS]) {
-          sh label: 'Upload & install', script: '''
+          sh label: 'Upload & install', script: """
 set -euo pipefail
 BIN_LOCAL="artifacts/api-ncbnews-backend-linux-amd64"
 
 # Upload binary to /tmp on target
-scp "$BIN_LOCAL" grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend
+scp "\$BIN_LOCAL" grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend
 
 # Generate systemd unit file
 bash deploy/generate-ncbnews-backend-service.sh "${TARGET_DIR}" api-ncbnews-backend.service
@@ -139,7 +139,7 @@ ssh grimlock@${TARGET_HOST} "
   sudo systemctl enable ${SERVICE_NAME}
   sudo systemctl restart ${SERVICE_NAME}
 "
-          '''
+          """
         }
       }
     }
