@@ -170,10 +170,10 @@ ssh grimlock@${env.TARGET_HOST} "
             # Push secrets to Cloudflare Worker
             node -e 'const s=k=>process.env[k]||"";console.log(JSON.stringify({
               BACKEND_ORIGIN:s("BACKEND_ORIGIN")
-            }))' | npx wrangler secret bulk
+            }))' | npx wrangler secret bulk --config dist/no_click_bait_news_frontend/wrangler.json
 
-            # Deploy Worker
-            npx wrangler deploy
+            # Deploy from build output (includes assets config + static files)
+            npx wrangler deploy --config dist/no_click_bait_news_frontend/wrangler.json
           '''
         }
       }
