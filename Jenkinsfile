@@ -16,7 +16,7 @@ pipeline {
     // Deployment targets
     TARGET_HOST     = 'web1'
     TARGET_DIR      = '/var/www/vhosts/api-ncbnews.portnumber53.com'
-    SERVICE_NAME    = 'ap-ncbnews-backend'
+    SERVICE_NAME    = 'api-ncbnews-backend'
     SSH_CREDENTIALS = 'brain-jenkins-private-key'
 
     // Database
