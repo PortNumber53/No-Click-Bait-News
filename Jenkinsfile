@@ -102,42 +102,42 @@ set -euo pipefail
 BIN_LOCAL="artifacts/api-ncbnews-backend-linux-amd64"
 
 # Upload binary to /tmp on target
-scp "\$BIN_LOCAL" grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend
+scp "\$BIN_LOCAL" grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend
 
 # Generate systemd unit file
-bash deploy/generate-ncbnews-backend-service.sh "${TARGET_DIR}" api-ncbnews-backend.service
+bash deploy/generate-ncbnews-backend-service.sh "${env.TARGET_DIR}" api-ncbnews-backend.service
 
 # Upload unit file
-scp api-ncbnews-backend.service grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend.service
+scp api-ncbnews-backend.service grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend.service
 
 # Generate .env for the service
 cat > /tmp/api-ncbnews-backend.env <<ENVFILE
-DATABASE_URL=${DATABASE_URL}
-JWT_SECRET_KEY=${JWT_SECRET_KEY}
-STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-STRIPE_WEBHOOK_SECRET_THIN=${STRIPE_WEBHOOK_SECRET_THIN}
-STRIPE_WEBHOOK_SECRET_SNAPSHOT=${STRIPE_WEBHOOK_SECRET_SNAPSHOT}
-ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+DATABASE_URL=${env.DATABASE_URL}
+JWT_SECRET_KEY=${env.JWT_SECRET_KEY}
+STRIPE_SECRET_KEY=${env.STRIPE_SECRET_KEY}
+STRIPE_WEBHOOK_SECRET=${env.STRIPE_WEBHOOK_SECRET}
+STRIPE_WEBHOOK_SECRET_THIN=${env.STRIPE_WEBHOOK_SECRET_THIN}
+STRIPE_WEBHOOK_SECRET_SNAPSHOT=${env.STRIPE_WEBHOOK_SECRET_SNAPSHOT}
+ALLOWED_ORIGINS=${env.ALLOWED_ORIGINS}
 PORT=21011
 ENVFILE
-scp /tmp/api-ncbnews-backend.env grimlock@${TARGET_HOST}:/tmp/api-ncbnews-backend.env
+scp /tmp/api-ncbnews-backend.env grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend.env
 rm -f /tmp/api-ncbnews-backend.env
 
 # Prepare target and (re)start service
-ssh grimlock@${TARGET_HOST} "
+ssh grimlock@${env.TARGET_HOST} "
   set -euo pipefail
-  sudo mkdir -p ${TARGET_DIR} ${TARGET_DIR}/logs
-  sudo chown -R grimlock:grimlock ${TARGET_DIR}
-  sudo mv /tmp/api-ncbnews-backend ${TARGET_DIR}/api-ncbnews-backend
-  sudo mv /tmp/api-ncbnews-backend.env ${TARGET_DIR}/.env
-  sudo chown grimlock:grimlock ${TARGET_DIR}/api-ncbnews-backend ${TARGET_DIR}/.env
-  sudo chmod 0755 ${TARGET_DIR}/api-ncbnews-backend
-  sudo chmod 0600 ${TARGET_DIR}/.env
-  sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/${SERVICE_NAME}.service
+  sudo mkdir -p ${env.TARGET_DIR} ${env.TARGET_DIR}/logs
+  sudo chown -R grimlock:grimlock ${env.TARGET_DIR}
+  sudo mv /tmp/api-ncbnews-backend ${env.TARGET_DIR}/api-ncbnews-backend
+  sudo mv /tmp/api-ncbnews-backend.env ${env.TARGET_DIR}/.env
+  sudo chown grimlock:grimlock ${env.TARGET_DIR}/api-ncbnews-backend ${env.TARGET_DIR}/.env
+  sudo chmod 0755 ${env.TARGET_DIR}/api-ncbnews-backend
+  sudo chmod 0600 ${env.TARGET_DIR}/.env
+  sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/${env.SERVICE_NAME}.service
   sudo systemctl daemon-reload
-  sudo systemctl enable ${SERVICE_NAME}
-  sudo systemctl restart ${SERVICE_NAME}
+  sudo systemctl enable ${env.SERVICE_NAME}
+  sudo systemctl restart ${env.SERVICE_NAME}
 "
           """
         }
