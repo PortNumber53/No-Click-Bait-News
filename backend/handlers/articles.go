@@ -141,13 +141,13 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * pageSize
-	query := fmt.Sprintf(`SELECT id, title, summary, content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, is_premium, view_count
+	query := fmt.Sprintf(`SELECT id, title, summary, content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, COALESCE(is_premium, false), COALESCE(view_count, 0)
 		FROM articles WHERE 1=1`, articleCategoriesSelect)
 	args := []any{}
 	argIdx := 1
 
 	if !hasPremium {
-		query += fmt.Sprintf(" AND is_premium = false")
+		query += " AND (is_premium = false OR is_premium IS NULL)"
 	}
 	if category != "" {
 		query += fmt.Sprintf(" AND (category = $%d OR $%d = ANY(COALESCE(categories, ARRAY[]::text[])))", argIdx, argIdx)
@@ -158,8 +158,11 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 	args = append(args, pageSize+1, offset)
 
+	log.Printf("[feed] user=%v hasPremium=%v query=%s args=%v", user != nil, hasPremium, query, args)
+
 	rows, err := h.pool.Query(r.Context(), query, args...)
 	if err != nil {
+		log.Printf("[feed] query error: %v", err)
 		Error(w, http.StatusInternalServerError, "Failed to fetch articles")
 		return
 	}
@@ -179,6 +182,8 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	if hasMore {
 		articles = articles[:pageSize]
 	}
+
+	h.attachArticleRewrites(r.Context(), articles)
 
 	JSON(w, http.StatusOK, models.FeedResponse{
 		Articles: articles,
@@ -236,12 +241,34 @@ func (h *Handler) GetMyArticles(w http.ResponseWriter, r *http.Request) {
 		articles = articles[:pageSize]
 	}
 
+	h.attachArticleRewrites(r.Context(), articles)
+
 	JSON(w, http.StatusOK, models.FeedResponse{
 		Articles: articles,
 		Page:     page,
 		PageSize: pageSize,
 		HasMore:  hasMore,
 	})
+}
+
+func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.ArticleResponse) {
+	for i := range articles {
+		rwRows, err := h.pool.Query(ctx,
+			`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+			 FROM article_rewrites ar
+			 JOIN llm_models lm ON lm.id = ar.llm_model_id
+			 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
+			 ORDER BY ar.llm_model_id`, articles[i].ID)
+		if err == nil {
+			for rwRows.Next() {
+				var rv models.RewriteVersion
+				if err := rwRows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err == nil {
+					articles[i].Rewrites = append(articles[i].Rewrites, rv)
+				}
+			}
+			rwRows.Close()
+		}
+	}
 }
 
 func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +281,7 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 
 	var a models.ArticleResponse
 	err = h.pool.QueryRow(r.Context(),
-		fmt.Sprintf(`SELECT id, title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, is_premium, view_count
+		fmt.Sprintf(`SELECT id, title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, COALESCE(is_premium, false), COALESCE(view_count, 0)
 		 FROM articles WHERE id = $1`, articleCategoriesSelect), articleID,
 	).Scan(&a.ID, &a.Title, &a.Summary, &a.Content, &a.OriginalContent, &a.RewriteStatus, &a.LLMRewriteVersion, &a.SourceName, &a.SourceURL,
 		&a.ImageURL, &a.Category, &a.Categories, &a.PublishedAt, &a.IsPremium, &a.ViewCount)
@@ -303,6 +330,10 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 
 	// Increment view count
 	h.pool.Exec(r.Context(), "UPDATE articles SET view_count = view_count + 1 WHERE id = $1", articleID)
+
+	articles := []models.ArticleResponse{a}
+	h.attachArticleRewrites(r.Context(), articles)
+	a = articles[0]
 
 	JSON(w, http.StatusOK, a)
 }

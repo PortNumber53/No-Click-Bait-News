@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/stripe/stripe-go/v82"
@@ -16,6 +18,16 @@ import (
 )
 
 func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
+	// Get user's current tier if authenticated
+	var currentTierID int
+	user := middleware.GetUser(r.Context())
+	if user != nil {
+		h.pool.QueryRow(r.Context(),
+			"SELECT tier_id FROM user_subscriptions WHERE user_id = $1 AND status = 'active'",
+			user.ID,
+		).Scan(&currentTierID)
+	}
+
 	rows, err := h.pool.Query(r.Context(),
 		"SELECT id, name, price_monthly, max_articles_per_day, has_premium_access FROM subscription_tiers")
 	if err != nil {
@@ -30,6 +42,7 @@ func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&t.ID, &t.Name, &t.PriceMonthly, &t.MaxArticlesPerDay, &t.HasPremiumAccess); err != nil {
 			continue
 		}
+		t.IsCurrent = t.ID == currentTierID
 		tiers = append(tiers, t)
 	}
 
@@ -63,8 +76,22 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 
 	stripe.Key = h.stripeKey
 
-	successURL := "noclickbaitnews://subscription/success"
-	cancelURL := "noclickbaitnews://subscription/cancel"
+	// Build redirect URLs from the request origin
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = r.Header.Get("Referer")
+		if origin != "" {
+			// Strip path from referer to get origin
+			if u, err := url.Parse(origin); err == nil {
+				origin = u.Scheme + "://" + u.Host
+			}
+		}
+	}
+	if origin == "" {
+		origin = "https://ncbnews.truvis.co"
+	}
+	successURL := origin + "/subscriptions?success=true"
+	cancelURL := origin + "/subscriptions?canceled=true"
 
 	params := &stripe.CheckoutSessionParams{
 		CustomerEmail: &user.Email,
@@ -94,35 +121,6 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 65536))
-	if err != nil {
-		Error(w, http.StatusBadRequest, "Failed to read body")
-		return
-	}
-
-	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), h.webhookSecret)
-	if err != nil {
-		Error(w, http.StatusBadRequest, "Invalid webhook signature")
-		return
-	}
-
-	switch event.Type {
-	case "checkout.session.completed":
-		var sess stripe.CheckoutSession
-		if err := json.Unmarshal(event.Data.Raw, &sess); err == nil {
-			h.handleCheckoutCompleted(r, &sess)
-		}
-	case "customer.subscription.updated", "customer.subscription.deleted":
-		var sub stripe.Subscription
-		if err := json.Unmarshal(event.Data.Raw, &sub); err == nil {
-			h.handleSubscriptionUpdated(r, &sub)
-		}
-	}
-
-	JSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
 // StripeWebhookThin handles thin (event-only) webhook payloads.
 // Thin events contain the event type and object ID but not the full object data.
 // The handler fetches the full object from Stripe's API when needed.
@@ -133,7 +131,9 @@ func (h *Handler) StripeWebhookThin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), h.webhookSecretThin)
+	event, err := webhook.ConstructEventWithOptions(body, r.Header.Get("Stripe-Signature"), h.webhookSecretThin, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
 		Error(w, http.StatusBadRequest, "Invalid webhook signature")
 		return
@@ -179,11 +179,23 @@ func (h *Handler) StripeWebhookSnapshot(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), h.webhookSecretSnapshot)
+	sig := r.Header.Get("Stripe-Signature")
+	if sig == "" {
+		log.Printf("[webhook/snapshot] Missing Stripe-Signature header")
+		Error(w, http.StatusBadRequest, "Missing Stripe-Signature header")
+		return
+	}
+
+	event, err := webhook.ConstructEventWithOptions(body, sig, h.webhookSecretSnapshot, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 	if err != nil {
+		log.Printf("[webhook/snapshot] Signature verification failed: %v", err)
 		Error(w, http.StatusBadRequest, "Invalid webhook signature")
 		return
 	}
+
+	log.Printf("[webhook/snapshot] Received event: %s", event.Type)
 
 	switch event.Type {
 	case "checkout.session.completed":

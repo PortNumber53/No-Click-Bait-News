@@ -93,7 +93,7 @@ export const api = {
   getSubscriptionTiers() {
     return request<SubscriptionTier[]>(
       `${API_BASE}/subscriptions/tiers`,
-      { headers: headers() },
+      { headers: headers(true) },
     );
   },
 

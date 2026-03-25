@@ -4,6 +4,7 @@ class SubscriptionTier {
   final double priceMonthly;
   final int maxArticlesPerDay;
   final bool hasPremiumAccess;
+  final bool isCurrent;
 
   const SubscriptionTier({
     required this.id,
@@ -11,15 +12,17 @@ class SubscriptionTier {
     required this.priceMonthly,
     required this.maxArticlesPerDay,
     required this.hasPremiumAccess,
+    required this.isCurrent,
   });
 
   factory SubscriptionTier.fromJson(Map<String, dynamic> json) {
     return SubscriptionTier(
-      id: json['id'],
-      name: json['name'],
+      id: json['id'] as int,
+      name: json['name'] as String,
       priceMonthly: (json['price_monthly'] as num).toDouble(),
-      maxArticlesPerDay: json['max_articles_per_day'],
-      hasPremiumAccess: json['has_premium_access'] ?? false,
+      maxArticlesPerDay: json['max_articles_per_day'] as int,
+      hasPremiumAccess: json['has_premium_access'] as bool? ?? false,
+      isCurrent: json['is_current'] as bool? ?? false,
     );
   }
 }

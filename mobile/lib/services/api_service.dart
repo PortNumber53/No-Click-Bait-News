@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:21011/api/v1',
+    defaultValue: 'https://ncbnews14.dev.portnumber53.com/api/v1',
   );
   static const _storage = FlutterSecureStorage();
 
@@ -79,6 +79,19 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to fetch articles');
   }
 
+  static Future<Map<String, dynamic>?> getMe() async {
+    final token = await _getToken();
+    if (token == null) return null;
+    final response = await http.get(
+      Uri.parse('$baseUrl/auth/me'),
+      headers: await _headers(auth: true),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    return null;
+  }
+
   static Future<Map<String, dynamic>> getArticle(String id) async {
     final response = await http.get(
       Uri.parse('$baseUrl/articles/$id'),
@@ -123,11 +136,40 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to fetch submitted URLs');
   }
 
+  static Future<void> submitVote({
+    required String articleId,
+    required String chosenRewriteId,
+    required String otherRewriteId,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/articles/$articleId/vote'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({
+        'chosen_rewrite_id': chosenRewriteId,
+        'other_rewrite_id': otherRewriteId,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(response.statusCode, 'Failed to submit vote');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getComparison(String articleId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/articles/$articleId/comparison'),
+      headers: await _headers(auth: true),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    return null;
+  }
+
   // Subscriptions
   static Future<List<dynamic>> getSubscriptionTiers() async {
     final response = await http.get(
       Uri.parse('$baseUrl/subscriptions/tiers'),
-      headers: await _headers(),
+      headers: await _headers(auth: true),
     );
     if (response.statusCode == 200) {
       return jsonDecode(response.body);

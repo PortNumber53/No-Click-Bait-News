@@ -14,6 +14,7 @@ export interface Article {
   published_at: string;
   is_premium: boolean;
   view_count: number;
+  rewrites?: RewriteVersion[];
 }
 
 export interface ArticleFeed {
@@ -29,6 +30,7 @@ export interface SubscriptionTier {
   price_monthly: number;
   max_articles_per_day: number;
   has_premium_access: boolean;
+  is_current: boolean;
 }
 
 export interface User {
@@ -46,6 +48,7 @@ export interface AuthResponse {
 
 export interface RewriteVersion {
   id: string;
+  model_name: string;
   title: string;
   summary: string;
   content?: string;

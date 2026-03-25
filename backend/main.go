@@ -137,9 +137,8 @@ func runServer() {
 	dbURL := mustEnv("DATABASE_URL")
 	jwtSecret := mustEnv("JWT_SECRET_KEY")
 	stripeKey := mustEnv("STRIPE_SECRET_KEY")
-	webhookSecret := mustEnv("STRIPE_WEBHOOK_SECRET")
 	webhookSecretThin := os.Getenv("STRIPE_WEBHOOK_SECRET_THIN")
-	webhookSecretSnapshot := os.Getenv("STRIPE_WEBHOOK_SECRET_SNAPSHOT")
+	webhookSecretSnapshot := mustEnv("STRIPE_WEBHOOK_SECRET_SNAPSHOT")
 	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
 	if allowedOrigins == "" {
 		allowedOrigins = "http://localhost:21010"
@@ -182,7 +181,7 @@ func runServer() {
 		log.Println("LLM article rewriting disabled: LLM_API_KEY and LLM_MODEL are not set")
 	}
 
-	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecret, webhookSecretThin, webhookSecretSnapshot, tinyFish, articleRewriter)
+	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecretThin, webhookSecretSnapshot, tinyFish, articleRewriter)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -203,7 +202,7 @@ func runServer() {
 		r.Post("/auth/register", h.Register)
 		r.Post("/auth/login", h.Login)
 
-		// Articles
+		// Articles & Subscriptions (optional auth)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.OptionalUser)
 			r.Get("/articles/feed", h.GetFeed)
@@ -211,6 +210,7 @@ func runServer() {
 			r.Get("/articles/{articleID}/comparison", h.GetComparison)
 			r.Get("/articles/{articleID}/vote-stats", h.GetVoteStats)
 			r.Post("/articles/{articleID}/vote", h.SubmitVote)
+			r.Get("/subscriptions/tiers", h.GetTiers)
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireUser)
@@ -218,18 +218,18 @@ func runServer() {
 			r.Post("/articles/fetch", h.FetchArticle)
 		})
 
-		// Subscriptions
-		r.Get("/subscriptions/tiers", h.GetTiers)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireUser)
+			r.Get("/auth/me", h.GetMe)
 			r.Post("/subscriptions/checkout", h.CreateCheckout)
 		})
-		r.Post("/subscriptions/webhook", h.StripeWebhook)
 	})
 
-	// Stripe webhooks — thin and snapshot payload formats
-	r.Post("/webhook/stripe/thin", h.StripeWebhookThin)
+	// Stripe webhooks
 	r.Post("/webhook/stripe/snapshot", h.StripeWebhookSnapshot)
+	if webhookSecretThin != "" {
+		r.Post("/webhook/stripe/thin", h.StripeWebhookThin)
+	}
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	log.Printf("Server listening on %s", addr)

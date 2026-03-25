@@ -27,9 +27,8 @@ pipeline {
 
     // Stripe
     STRIPE_SECRET_KEY              = credentials('prod-stripe-secret-key-ncbnews')
-    STRIPE_WEBHOOK_SECRET          = credentials('prod-stripe-webhook-secret-ncbnews')
-    STRIPE_WEBHOOK_SECRET_THIN     = credentials('prod-stripe-webhook-secret-thin-ncbnews')
     STRIPE_WEBHOOK_SECRET_SNAPSHOT = credentials('prod-stripe-webhook-secret-snapshot-ncbnews')
+    STRIPE_WEBHOOK_SECRET_THIN     = credentials('prod-stripe-webhook-secret-thin-ncbnews')
 
     // TinyFish content fetching
     TINYFISH_API_KEY = credentials('prod-tinyfish-api-key')
@@ -137,8 +136,6 @@ cat > /tmp/api-ncbnews-backend.env <<ENVFILE
 DATABASE_URL=${env.DATABASE_URL}
 JWT_SECRET_KEY=${env.JWT_SECRET_KEY}
 STRIPE_SECRET_KEY=${env.STRIPE_SECRET_KEY}
-STRIPE_WEBHOOK_SECRET=${env.STRIPE_WEBHOOK_SECRET}
-STRIPE_WEBHOOK_SECRET_THIN=${env.STRIPE_WEBHOOK_SECRET_THIN}
 STRIPE_WEBHOOK_SECRET_SNAPSHOT=${env.STRIPE_WEBHOOK_SECRET_SNAPSHOT}
 TINYFISH_API_KEY=${env.TINYFISH_API_KEY}
 LLM_API_KEY=${env.LLM_API_KEY}
@@ -147,6 +144,7 @@ LLM_MODEL=${env.LLM_MODEL}
 LLM_REWRITE_WORKERS=${env.LLM_REWRITE_WORKERS}
 LLM_REWRITE_QUEUE_SIZE=${env.LLM_REWRITE_QUEUE_SIZE}
 LLM_REWRITE_TIMEOUT_SECONDS=${env.LLM_REWRITE_TIMEOUT_SECONDS}
+STRIPE_WEBHOOK_SECRET_THIN=${env.STRIPE_WEBHOOK_SECRET_THIN}
 ALLOWED_ORIGINS=${env.ALLOWED_ORIGINS}
 PORT=21011
 ENVFILE

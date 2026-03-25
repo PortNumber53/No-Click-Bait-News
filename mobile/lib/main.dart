@@ -48,14 +48,28 @@ class NoClickBaitNewsApp extends StatelessWidget {
   }
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  @override
+  void initState() {
+    super.initState();
+    // Kick off session restore after the first frame so the provider is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AuthProvider>().tryRestoreSession();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
       builder: (context, auth, _) {
-        if (auth.isLoading) {
+        if (!auth.isInitialized) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );

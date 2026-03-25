@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"math/big"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -32,12 +33,13 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get completed rewrites (expect exactly 2)
+	// Get all completed rewrites for this article, including model display name
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT id, rewritten_title, rewritten_summary, rewritten_content
-		 FROM article_rewrites
-		 WHERE article_id = $1 AND processing_status = 'completed'
-		 ORDER BY llm_model_id`, articleID)
+		`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+		 FROM article_rewrites ar
+		 JOIN llm_models lm ON lm.id = ar.llm_model_id
+		 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
+		 ORDER BY ar.llm_model_id`, articleID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to fetch rewrites")
 		return
@@ -47,7 +49,7 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 	var rewrites []models.RewriteVersion
 	for rows.Next() {
 		var rv models.RewriteVersion
-		if err := rows.Scan(&rv.ID, &rv.Title, &rv.Summary, &rv.Content); err != nil {
+		if err := rows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
 			continue
 		}
 		rewrites = append(rewrites, rv)
@@ -58,21 +60,15 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deterministic A/B assignment based on article + user
-	swap := false
+	// Pick a deterministic random pair for this user+article
 	user := middleware.GetUser(r.Context())
+	seed := articleID.String()
 	if user != nil {
-		hash := sha256.Sum256([]byte(articleID.String() + user.ID.String()))
-		swap = binary.BigEndian.Uint32(hash[:4])%2 == 1
+		seed += user.ID.String()
 	}
-
-	if swap {
-		resp.VersionA = rewrites[1]
-		resp.VersionB = rewrites[0]
-	} else {
-		resp.VersionA = rewrites[0]
-		resp.VersionB = rewrites[1]
-	}
+	idxA, idxB := pickPair(seed, len(rewrites))
+	resp.VersionA = rewrites[idxA]
+	resp.VersionB = rewrites[idxB]
 
 	// Check if user already voted
 	if user != nil {
@@ -153,53 +149,79 @@ func (h *Handler) GetVoteStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) sendVoteStats(w http.ResponseWriter, r *http.Request, articleID uuid.UUID) {
-	// Get the two rewrites with their model names
-	rows, err := h.pool.Query(r.Context(),
-		`SELECT ar.id, lm.display_name
-		 FROM article_rewrites ar
-		 JOIN llm_models lm ON lm.id = ar.llm_model_id
-		 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
-		 ORDER BY ar.llm_model_id`, articleID)
-	if err != nil {
-		Error(w, http.StatusInternalServerError, "Failed to fetch stats")
+	user := middleware.GetUser(r.Context())
+	if user == nil {
+		Error(w, http.StatusUnauthorized, "Login required")
 		return
 	}
-	defer rows.Close()
+
+	// Get the pair the user voted on
+	var chosenID, otherID uuid.UUID
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT chosen_rewrite_id, other_rewrite_id FROM rewrite_votes
+		 WHERE article_id = $1 AND user_id = $2`, articleID, user.ID,
+	).Scan(&chosenID, &otherID)
+	if err != nil {
+		Error(w, http.StatusNotFound, "No vote found")
+		return
+	}
 
 	type rewriteInfo struct {
 		ID   uuid.UUID
 		Name string
 	}
-	var infos []rewriteInfo
-	for rows.Next() {
+
+	getInfo := func(rewriteID uuid.UUID) rewriteInfo {
 		var ri rewriteInfo
-		if err := rows.Scan(&ri.ID, &ri.Name); err != nil {
-			continue
-		}
-		infos = append(infos, ri)
+		h.pool.QueryRow(r.Context(),
+			`SELECT ar.id, lm.display_name FROM article_rewrites ar
+			 JOIN llm_models lm ON lm.id = ar.llm_model_id WHERE ar.id = $1`, rewriteID,
+		).Scan(&ri.ID, &ri.Name)
+		return ri
 	}
 
-	if len(infos) < 2 {
-		Error(w, http.StatusNotFound, "Stats not available")
-		return
-	}
+	infoA := getInfo(chosenID)
+	infoB := getInfo(otherID)
 
-	// Count votes for each
 	var votesA, votesB int
 	h.pool.QueryRow(r.Context(),
-		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", infos[0].ID,
+		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", chosenID,
 	).Scan(&votesA)
 	h.pool.QueryRow(r.Context(),
-		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", infos[1].ID,
+		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", otherID,
 	).Scan(&votesB)
 
 	JSON(w, http.StatusOK, models.VoteStatsResponse{
 		ArticleID:     articleID,
-		VersionAID:    infos[0].ID,
-		VersionAName:  infos[0].Name,
+		VersionAID:    infoA.ID,
+		VersionAName:  infoA.Name,
 		VersionAVotes: votesA,
-		VersionBID:    infos[1].ID,
-		VersionBName:  infos[1].Name,
+		VersionBID:    infoB.ID,
+		VersionBName:  infoB.Name,
 		VersionBVotes: votesB,
 	})
+}
+
+// pickPair returns two distinct indices from [0, n) deterministically based on seed.
+func pickPair(seed string, n int) (int, int) {
+	hash := sha256.Sum256([]byte(seed))
+	h := new(big.Int).SetBytes(hash[:])
+
+	idxA := int(new(big.Int).Mod(h, big.NewInt(int64(n))).Int64())
+
+	// Use second half of hash for idxB, ensuring it differs from idxA
+	hash2 := sha256.Sum256(hash[:])
+	h2 := new(big.Int).SetBytes(hash2[:])
+	idxB := int(new(big.Int).Mod(h2, big.NewInt(int64(n-1))).Int64())
+	if idxB >= idxA {
+		idxB++
+	}
+
+	// Use a third hash to decide A/B label order
+	hash3 := sha256.Sum256(hash2[:])
+	if binary.BigEndian.Uint32(hash3[:4])%2 == 1 {
+		idxA, idxB = idxB, idxA
+	}
+
+	return idxA, idxB
 }

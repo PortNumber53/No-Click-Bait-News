@@ -19,6 +19,9 @@
 		"not_found_handling": "single-page-application",
 		"run_worker_first": true
 	},
+	"vars": {
+		"BACKEND_ORIGIN": "http://localhost:21011"
+	},
 	"dev": {
 		"ip": "0.0.0.0",
 		"port": 21012

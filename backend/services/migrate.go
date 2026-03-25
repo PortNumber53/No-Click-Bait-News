@@ -83,6 +83,7 @@ var schemaDDL = []string{
 	`CREATE INDEX IF NOT EXISTS ix_articles_categories ON articles USING GIN (categories)`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_published_at ON articles (published_at)`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_submitted_by_user_id ON articles (submitted_by_user_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ix_articles_source_url ON articles (source_url)`,
 
 	`CREATE TABLE IF NOT EXISTS subscription_tiers (
 		id SERIAL PRIMARY KEY,
@@ -107,6 +108,9 @@ var schemaDDL = []string{
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
 
+	// Ensure articles.id has a default (may be missing on older tables)
+	`ALTER TABLE articles ALTER COLUMN id SET DEFAULT gen_random_uuid()`,
+
 	// LLM comparison system
 	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS original_title VARCHAR`,
 	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS original_summary TEXT`,
@@ -118,8 +122,13 @@ var schemaDDL = []string{
 		display_name VARCHAR NOT NULL,
 		openrouter_model_id VARCHAR NOT NULL,
 		is_active BOOLEAN NOT NULL DEFAULT true,
+		input_cost_per_million NUMERIC(10,4) NOT NULL DEFAULT 0,
+		output_cost_per_million NUMERIC(10,4) NOT NULL DEFAULT 0,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE llm_models ADD COLUMN IF NOT EXISTS input_cost_per_million NUMERIC(10,4) NOT NULL DEFAULT 0`,
+	`ALTER TABLE llm_models ADD COLUMN IF NOT EXISTS output_cost_per_million NUMERIC(10,4) NOT NULL DEFAULT 0`,
+	`ALTER TABLE llm_models ADD COLUMN IF NOT EXISTS rate_limited_until TIMESTAMPTZ`,
 
 	`CREATE TABLE IF NOT EXISTS article_rewrites (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -176,17 +185,35 @@ func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func seedLLMModels(ctx context.Context, pool *pgxpool.Pool) error {
-	models := []struct {
+	type llmSeed struct {
 		Slug, DisplayName, OpenRouterID string
-	}{
-		{"anthropic/claude-sonnet-4", "Claude Sonnet 4", "anthropic/claude-sonnet-4"},
-		{"openai/gpt-4o", "GPT-4o", "openai/gpt-4o"},
+		InputCost, OutputCost           float64
+		Active                          bool
+	}
+	models := []llmSeed{
+		// Free models
+		{"nvidia/nemotron-3-nano-30b-a3b:free", "Nemotron 3 Nano 30B", "nvidia/nemotron-3-nano-30b-a3b:free", 0, 0, true},
+		{"stepfun/step-3.5-flash:free", "Step 3.5 Flash", "stepfun/step-3.5-flash:free", 0, 0, true},
+		{"qwen/qwen3-next-80b-a3b-instruct:free", "Qwen3 Next 80B", "qwen/qwen3-next-80b-a3b-instruct:free", 0, 0, true},
+		{"qwen/qwen3-coder:free", "Qwen3 Coder", "qwen/qwen3-coder:free", 0, 0, true},
+		{"google/gemma-3-27b-it:free", "Gemma 3 27B", "google/gemma-3-27b-it:free", 0, 0, true},
+		{"meta-llama/llama-3.2-3b-instruct:free", "Llama 3.2 3B", "meta-llama/llama-3.2-3b-instruct:free", 0, 0, true},
+		{"nousresearch/hermes-3-llama-3.1-405b:free", "Hermes 3 405B", "nousresearch/hermes-3-llama-3.1-405b:free", 0, 0, true},
+		// Previously active free models (deactivate)
+		{"meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B", "meta-llama/llama-3.3-70b-instruct:free", 0, 0, false},
+		// Paid models (inactive)
+		{"anthropic/claude-sonnet-4", "Claude Sonnet 4", "anthropic/claude-sonnet-4", 3.0, 15.0, false},
+		{"openai/gpt-4o", "GPT-4o", "openai/gpt-4o", 2.5, 10.0, false},
 	}
 	for _, m := range models {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO llm_models (slug, display_name, openrouter_model_id)
-			 VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING`,
-			m.Slug, m.DisplayName, m.OpenRouterID,
+			`INSERT INTO llm_models (slug, display_name, openrouter_model_id, input_cost_per_million, output_cost_per_million, is_active)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (slug) DO UPDATE SET
+			   input_cost_per_million = EXCLUDED.input_cost_per_million,
+			   output_cost_per_million = EXCLUDED.output_cost_per_million,
+			   is_active = EXCLUDED.is_active`,
+			m.Slug, m.DisplayName, m.OpenRouterID, m.InputCost, m.OutputCost, m.Active,
 		)
 		if err != nil {
 			return err

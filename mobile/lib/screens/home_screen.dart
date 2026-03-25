@@ -5,7 +5,7 @@ import '../models/article.dart';
 import '../providers/auth_provider.dart';
 import '../providers/news_provider.dart';
 import '../services/api_service.dart';
-import '../widgets/article_card.dart';
+import '../widgets/article_version_card.dart';
 import '../widgets/shimmer_card.dart';
 import 'article_detail_screen.dart';
 import 'my_urls_screen.dart';
@@ -47,7 +47,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    // Load initial articles
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<NewsProvider>().loadArticles(refresh: true);
     });
@@ -62,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onScroll() {
     if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 300) {
+        _scrollController.position.maxScrollExtent - 400) {
       context.read<NewsProvider>().loadArticles();
     }
   }
@@ -106,9 +105,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'No-Click Bait News',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.newspaper_rounded,
+                color: theme.colorScheme.primary, size: 22),
+            const SizedBox(width: 8),
+            const Text(
+              'No-Click Bait News',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -132,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.logout_rounded),
             tooltip: 'Sign Out',
             onPressed: () => context.read<AuthProvider>().logout(),
           ),
@@ -202,13 +209,14 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          // Article list with infinite scroll
+          const Divider(height: 1),
+          // Article feed with infinite scroll
           Expanded(
             child: Consumer<NewsProvider>(
               builder: (context, news, _) {
                 if (news.articles.isEmpty && news.isLoading) {
                   return ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: 5,
                     itemBuilder: (_, __) => const ShimmerCard(),
                   );
@@ -216,19 +224,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 if (news.articles.isEmpty && news.error != null) {
                   return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.error_outline,
-                            size: 48, color: theme.colorScheme.error),
-                        const SizedBox(height: 16),
-                        Text(news.error!),
-                        const SizedBox(height: 16),
-                        FilledButton.tonal(
-                          onPressed: _refresh,
-                          child: const Text('Retry'),
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.wifi_off_rounded,
+                              size: 56,
+                              color: theme.colorScheme.onSurfaceVariant),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Could not load articles',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            news.error!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 24),
+                          FilledButton.icon(
+                            onPressed: _refresh,
+                            icon: const Icon(Icons.refresh_rounded),
+                            label: const Text('Retry'),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 }
@@ -241,18 +265,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   onRefresh: _refresh,
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.only(top: 8, bottom: 24),
                     itemCount: news.articles.length + (news.hasMore ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index == news.articles.length) {
                         return const Padding(
-                          padding: EdgeInsets.all(24),
+                          padding: EdgeInsets.symmetric(vertical: 32),
                           child: Center(child: CircularProgressIndicator()),
                         );
                       }
 
                       final article = news.articles[index];
-                      return ArticleCard(
+                      return ArticleVersionCard(
+                        key: ValueKey(article.id),
                         article: article,
                         onTap: () {
                           Navigator.push(

@@ -5,12 +5,32 @@ import '../services/api_service.dart';
 class AuthProvider extends ChangeNotifier {
   User? _user;
   bool _isLoading = false;
+  bool _isInitialized = false;
   String? _error;
 
   User? get user => _user;
   bool get isLoading => _isLoading;
+  bool get isInitialized => _isInitialized;
   bool get isAuthenticated => _user != null;
   String? get error => _error;
+
+  Future<void> tryRestoreSession() async {
+    _isLoading = true;
+    notifyListeners();
+    try {
+      final data = await ApiService.getMe();
+      if (data != null) {
+        _user = User.fromJson(data);
+      }
+    } catch (_) {
+      // Token invalid/expired — stay logged out, clear stale token
+      await ApiService.clearToken();
+    } finally {
+      _isLoading = false;
+      _isInitialized = true;
+      notifyListeners();
+    }
+  }
 
   Future<bool> login(String email, String password) async {
     _isLoading = true;

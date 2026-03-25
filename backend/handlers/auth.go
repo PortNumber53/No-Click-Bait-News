@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/PortNumber53/no-click-bait-news/backend/middleware"
 	"github.com/PortNumber53/no-click-bait-news/backend/models"
 )
 
@@ -135,6 +136,29 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:        user.CreatedAt,
 			SubscriptionTier: tierName,
 		},
+	})
+}
+
+func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r.Context())
+	if user == nil {
+		Error(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+
+	var tierName *string
+	h.pool.QueryRow(r.Context(),
+		`SELECT st.name FROM user_subscriptions us
+		 JOIN subscription_tiers st ON st.id = us.tier_id
+		 WHERE us.user_id = $1`, user.ID,
+	).Scan(&tierName)
+
+	JSON(w, http.StatusOK, models.UserResponse{
+		ID:               user.ID,
+		Email:            user.Email,
+		Name:             user.Name,
+		CreatedAt:        user.CreatedAt,
+		SubscriptionTier: tierName,
 	})
 }
 

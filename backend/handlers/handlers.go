@@ -12,7 +12,6 @@ type Handler struct {
 	pool                  *pgxpool.Pool
 	jwtSecret             []byte
 	stripeKey             string
-	webhookSecret         string
 	webhookSecretThin     string
 	webhookSecretSnapshot string
 	tinyFish              *services.TinyFishClient
@@ -20,12 +19,11 @@ type Handler struct {
 	rewriteJobs           chan articleRewriteJob
 }
 
-func New(pool *pgxpool.Pool, jwtSecret, stripeKey, webhookSecret, webhookSecretThin, webhookSecretSnapshot string, tinyFish *services.TinyFishClient, articleRewriter *services.ArticleRewriter) *Handler {
+func New(pool *pgxpool.Pool, jwtSecret, stripeKey, webhookSecretThin, webhookSecretSnapshot string, tinyFish *services.TinyFishClient, articleRewriter *services.ArticleRewriter) *Handler {
 	h := &Handler{
 		pool:                  pool,
 		jwtSecret:             []byte(jwtSecret),
 		stripeKey:             stripeKey,
-		webhookSecret:         webhookSecret,
 		webhookSecretThin:     webhookSecretThin,
 		webhookSecretSnapshot: webhookSecretSnapshot,
 		tinyFish:              tinyFish,

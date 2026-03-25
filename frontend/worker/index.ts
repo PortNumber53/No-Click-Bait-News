@@ -1,8 +1,6 @@
-const API_BACKEND = 'http://localhost:21011';
-
 interface AppEnv extends Env {
   ASSETS: Fetcher;
-  BACKEND_ORIGIN?: string;
+  BACKEND_ORIGIN: string;
 }
 
 export default {
@@ -11,10 +9,9 @@ export default {
 
     // Proxy API and webhook routes to the Go backend
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhook/')) {
-      const backendOrigin = env.BACKEND_ORIGIN || API_BACKEND;
-      const backendUrl = new URL(url.pathname + url.search, backendOrigin);
+      const backendUrl = new URL(url.pathname + url.search, env.BACKEND_ORIGIN);
       const headers = new Headers(request.headers);
-      headers.set('Host', new URL(backendOrigin).host);
+      headers.set('Host', new URL(env.BACKEND_ORIGIN).host);
 
       return fetch(backendUrl.toString(), {
         method: request.method,

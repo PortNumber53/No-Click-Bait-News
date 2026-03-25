@@ -22,7 +22,7 @@ export function SubscriptionPage() {
     try {
       const data = await api.createCheckout(tier.id);
       if (data.checkout_url) {
-        window.open(data.checkout_url, '_blank');
+        window.location.href = data.checkout_url;
       }
     } catch {
       // handled silently
@@ -45,8 +45,9 @@ export function SubscriptionPage() {
         {tiers.map(tier => {
           const isPremium = tier.name === 'premium';
           return (
-            <div key={tier.id} className={`sub-card ${isPremium ? 'sub-card--featured' : ''}`}>
-              {isPremium && <span className="sub-card__badge">MOST POPULAR</span>}
+            <div key={tier.id} className={`sub-card ${isPremium ? 'sub-card--featured' : ''} ${tier.is_current ? 'sub-card--current' : ''}`}>
+              {isPremium && !tier.is_current && <span className="sub-card__badge">MOST POPULAR</span>}
+              {tier.is_current && <span className="sub-card__badge sub-card__badge--current">YOUR PLAN</span>}
               <h2 className="sub-card__name">
                 {tier.name.charAt(0).toUpperCase() + tier.name.slice(1)}
               </h2>
@@ -58,7 +59,11 @@ export function SubscriptionPage() {
                 <li>{tier.max_articles_per_day} articles/day</li>
                 {tier.has_premium_access && <li>&#9733; Premium content access</li>}
               </ul>
-              {tier.price_monthly > 0 ? (
+              {tier.is_current ? (
+                <button className="btn btn--tonal sub-card__btn" disabled>
+                  Current Plan
+                </button>
+              ) : tier.price_monthly > 0 ? (
                 <button
                   className="btn btn--filled sub-card__btn"
                   onClick={() => subscribe(tier)}
@@ -68,7 +73,7 @@ export function SubscriptionPage() {
                 </button>
               ) : (
                 <button className="btn btn--tonal sub-card__btn" disabled>
-                  Current Plan
+                  Free
                 </button>
               )}
             </div>

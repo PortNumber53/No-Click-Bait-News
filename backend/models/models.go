@@ -89,21 +89,22 @@ type TokenResponse struct {
 }
 
 type ArticleResponse struct {
-	ID                uuid.UUID `json:"id"`
-	Title             string    `json:"title"`
-	Summary           string    `json:"summary"`
-	Content           *string   `json:"content"`
-	OriginalContent   *string   `json:"original_content,omitempty"`
-	RewriteStatus     string    `json:"rewrite_status"`
-	LLMRewriteVersion int       `json:"llm_rewrite_version"`
-	SourceName        string    `json:"source_name"`
-	SourceURL         string    `json:"source_url"`
-	ImageURL          *string   `json:"image_url"`
-	Category          *string   `json:"category"`
-	Categories        []string  `json:"categories"`
-	PublishedAt       time.Time `json:"published_at"`
-	IsPremium         bool      `json:"is_premium"`
-	ViewCount         int       `json:"view_count"`
+	ID                uuid.UUID        `json:"id"`
+	Title             string           `json:"title"`
+	Summary           string           `json:"summary"`
+	Content           *string          `json:"content"`
+	OriginalContent   *string          `json:"original_content,omitempty"`
+	RewriteStatus     string           `json:"rewrite_status"`
+	LLMRewriteVersion int              `json:"llm_rewrite_version"`
+	SourceName        string           `json:"source_name"`
+	SourceURL         string           `json:"source_url"`
+	ImageURL          *string          `json:"image_url"`
+	Category          *string          `json:"category"`
+	Categories        []string         `json:"categories"`
+	PublishedAt       time.Time        `json:"published_at"`
+	IsPremium         bool             `json:"is_premium"`
+	ViewCount         int              `json:"view_count"`
+	Rewrites          []RewriteVersion `json:"rewrites,omitempty"`
 }
 
 type FeedResponse struct {
@@ -119,6 +120,7 @@ type TierResponse struct {
 	PriceMonthly      float64 `json:"price_monthly"`
 	MaxArticlesPerDay int     `json:"max_articles_per_day"`
 	HasPremiumAccess  bool    `json:"has_premium_access"`
+	IsCurrent         bool    `json:"is_current"`
 }
 
 type CheckoutRequest struct {
@@ -133,10 +135,11 @@ type CheckoutResponse struct {
 // LLM comparison types
 
 type RewriteVersion struct {
-	ID      uuid.UUID `json:"id"`
-	Title   string    `json:"title"`
-	Summary string    `json:"summary"`
-	Content *string   `json:"content"`
+	ID        uuid.UUID `json:"id"`
+	ModelName string    `json:"model_name"`
+	Title     string    `json:"title"`
+	Summary   string    `json:"summary"`
+	Content   *string   `json:"content"`
 }
 
 type ComparisonResponse struct {

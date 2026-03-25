@@ -71,7 +71,7 @@ export function ArticleDetailPage() {
           <span>{date}</span>
         </div>
 
-        {comparison && <ComparisonCard comparison={comparison} />}
+        {comparison && <ComparisonCard comparison={comparison} showContent />}
 
         <hr className="detail__divider" />
         <div className="detail__summary">
