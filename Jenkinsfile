@@ -93,6 +93,34 @@ pipeline {
       }
     }
 
+    stage('DB Migrate') {
+      steps {
+        dir('backend') {
+          sh label: 'Run Alembic migrations', script: """
+            set -euo pipefail
+            python3 -m venv /tmp/ncbnews-migrate-venv
+            /tmp/ncbnews-migrate-venv/bin/pip install -q alembic psycopg2-binary sqlalchemy python-dotenv
+            PYTHONPATH=. /tmp/ncbnews-migrate-venv/bin/alembic upgrade head
+            rm -rf /tmp/ncbnews-migrate-venv
+          """
+        }
+      }
+    }
+
+    stage('Seed Data') {
+      steps {
+        dir('backend') {
+          sh label: 'Seed subscription tiers and sample data', script: """
+            set -euo pipefail
+            python3 -m venv /tmp/ncbnews-seed-venv
+            /tmp/ncbnews-seed-venv/bin/pip install -q -r requirements.txt
+            PYTHONPATH=. /tmp/ncbnews-seed-venv/bin/python seed.py
+            rm -rf /tmp/ncbnews-seed-venv
+          """
+        }
+      }
+    }
+
     stage('Deploy (amd64 → web1)') {
       steps {
         unstash "bin-amd64"
