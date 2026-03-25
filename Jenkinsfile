@@ -135,9 +135,10 @@ ENVFILE
 scp /tmp/api-ncbnews-backend.env grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend.env
 rm -f /tmp/api-ncbnews-backend.env
 
-# Prepare target and (re)start service
+# Stop service, replace binary, restart
 ssh grimlock@${env.TARGET_HOST} "
   set -euo pipefail
+  sudo systemctl stop ${env.SERVICE_NAME} 2>/dev/null || true
   sudo mkdir -p ${env.TARGET_DIR} ${env.TARGET_DIR}/logs
   sudo chown -R grimlock:grimlock ${env.TARGET_DIR}
   sudo mv /tmp/api-ncbnews-backend ${env.TARGET_DIR}/api-ncbnews-backend
@@ -148,7 +149,7 @@ ssh grimlock@${env.TARGET_HOST} "
   sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/${env.SERVICE_NAME}.service
   sudo systemctl daemon-reload
   sudo systemctl enable ${env.SERVICE_NAME}
-  sudo systemctl restart ${env.SERVICE_NAME}
+  sudo systemctl start ${env.SERVICE_NAME}
 "
           """
         }
@@ -170,10 +171,10 @@ ssh grimlock@${env.TARGET_HOST} "
             # Push secrets to Cloudflare Worker
             node -e 'const s=k=>process.env[k]||"";console.log(JSON.stringify({
               BACKEND_ORIGIN:s("BACKEND_ORIGIN")
-            }))' | npx wrangler secret bulk --config dist/no_click_bait_news_frontend/wrangler.json
+            }))' | npx wrangler secret bulk
 
-            # Deploy from build output (includes assets config + static files)
-            npx wrangler deploy --config dist/no_click_bait_news_frontend/wrangler.json
+            # Deploy Worker with static assets
+            npx wrangler deploy
           '''
         }
       }

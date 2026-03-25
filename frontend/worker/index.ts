@@ -1,16 +1,17 @@
 const API_BACKEND = 'http://localhost:21011';
 
 interface AppEnv extends Env {
-  ASSETS: { fetch(request: Request): Promise<Response> };
   BACKEND_ORIGIN?: string;
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const backendOrigin = env.BACKEND_ORIGIN || API_BACKEND;
 
-    if (url.pathname.startsWith('/api/')) {
+    // Only handle API routes — static assets and SPA fallback
+    // are handled by Workers Static Assets (configured in wrangler.jsonc)
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/webhook/')) {
+      const backendOrigin = env.BACKEND_ORIGIN || API_BACKEND;
       const backendUrl = new URL(url.pathname + url.search, backendOrigin);
       const headers = new Headers(request.headers);
       headers.set('Host', new URL(backendOrigin).host);
@@ -22,12 +23,7 @@ export default {
       });
     }
 
-    // Serve static assets; fall back to index.html for SPA routes
-    const response = await env.ASSETS.fetch(request);
-    if (response.status === 404) {
-      // SPA fallback: serve index.html for client-side routing
-      return env.ASSETS.fetch(new Request(new URL('/', request.url), request));
-    }
-    return response;
+    // For non-API routes, return nothing — the assets platform serves static files
+    return new Response('Not Found', { status: 404 });
   },
 } satisfies ExportedHandler<AppEnv>;

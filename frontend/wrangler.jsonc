@@ -13,6 +13,9 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	"assets": {
+		"not_found_handling": "single-page-application"
+	},
 	"dev": {
 		"ip": "0.0.0.0",
 		"port": 21012
