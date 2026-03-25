@@ -23,6 +23,35 @@ import (
 func main() {
 	_ = godotenv.Load()
 
+	// Subcommand: migrate
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrate()
+		return
+	}
+
+	// Default: run the HTTP server
+	runServer()
+}
+
+func runMigrate() {
+	dbURL := mustEnv("DATABASE_URL")
+
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	log.Println("Running migrations...")
+	if err := services.Migrate(ctx, pool); err != nil {
+		log.Fatalf("Migration failed: %v", err)
+	}
+	log.Println("Migrations completed successfully")
+}
+
+func runServer() {
 	dbURL := mustEnv("DATABASE_URL")
 	jwtSecret := mustEnv("JWT_SECRET_KEY")
 	stripeKey := mustEnv("STRIPE_SECRET_KEY")
@@ -48,10 +77,6 @@ func main() {
 		log.Fatalf("Unable to ping database: %v", err)
 	}
 	log.Println("Connected to database")
-
-	// Ensure stripe_product_id column exists (idempotent)
-	pool.Exec(context.Background(),
-		"ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS stripe_product_id VARCHAR UNIQUE")
 
 	// Sync subscription tiers with Stripe
 	if err := services.SyncSubscriptionTiers(context.Background(), pool, stripeKey); err != nil {
