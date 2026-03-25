@@ -1,0 +1,103 @@
+.sub {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.sub__header {
+  margin-bottom: 24px;
+}
+
+.sub__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 12px 0 0;
+  color: var(--on-surface);
+}
+
+.sub__loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px;
+}
+
+.sub__grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sub-card {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.sub-card--featured {
+  border: 2px solid var(--primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.sub-card__badge {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: var(--primary);
+  color: var(--on-primary);
+  margin-bottom: 12px;
+}
+
+.sub-card__name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--on-surface);
+}
+
+.sub-card__price {
+  margin-bottom: 16px;
+}
+
+.sub-card__amount {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.sub-card__period {
+  font-size: 0.875rem;
+  color: var(--on-surface-variant);
+}
+
+.sub-card__features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px;
+}
+
+.sub-card__features li {
+  padding: 4px 0;
+  font-size: 0.9375rem;
+  color: var(--on-surface-variant);
+}
+
+.sub-card__features li::before {
+  content: '  ';
+}
+
+.sub-card__btn {
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .sub__grid {
+    flex-direction: row;
+  }
+
+  .sub-card {
+    flex: 1;
+  }
+}

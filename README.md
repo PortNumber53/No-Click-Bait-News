@@ -33,7 +33,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # Edit with your credentials
 python seed.py          # Seed the database
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 21011
 ```
 
 ## Mobile Setup

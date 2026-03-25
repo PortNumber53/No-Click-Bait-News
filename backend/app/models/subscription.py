@@ -17,6 +17,7 @@ class SubscriptionTier(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, unique=True, nullable=False)  # free, basic, premium
+    stripe_product_id = Column(String, unique=True, nullable=True)
     stripe_price_id = Column(String, unique=True, nullable=True)
     price_monthly = Column(Numeric(10, 2), nullable=False, default=0)
     max_articles_per_day = Column(Integer, nullable=False, default=10)

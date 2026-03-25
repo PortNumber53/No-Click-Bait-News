@@ -1,0 +1,46 @@
+.shimmer-card {
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.shimmer-card__image {
+  aspect-ratio: 16 / 9;
+}
+
+.shimmer-card__body {
+  padding: 16px;
+}
+
+.shimmer-card__meta {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--surface-variant) 25%,
+    var(--surface) 50%,
+    var(--surface-variant) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+.shimmer--tag { width: 72px; height: 20px; }
+.shimmer--time { width: 48px; height: 20px; margin-left: auto; }
+.shimmer--title { height: 18px; margin-bottom: 8px; }
+.shimmer--short { width: 60%; }
+.shimmer--text { height: 14px; margin-bottom: 6px; }
+.shimmer--medium { width: 80%; }
+.shimmer--source { width: 100px; height: 14px; margin-top: 8px; }
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

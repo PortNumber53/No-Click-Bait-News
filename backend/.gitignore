@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 .env
+server.env
+server/tmp/
 *.egg-info/
 dist/
 .venv/

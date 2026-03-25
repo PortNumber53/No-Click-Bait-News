@@ -1,0 +1,18 @@
+# Air configuration for live-reloading Go server
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/server ."
+  bin = "./tmp/server"
+  full_bin = "./tmp/server"
+  include_ext = ["go"]
+  exclude_dir = ["tmp"]
+  delay = 1000
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true
