@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MarkdownContent } from '../components/MarkdownContent';
-import { api } from '../services/api';
-import type { Article } from '../types';
+import { api, ApiError } from '../services/api';
+import type { Article, ComparisonData } from '../types';
+import { ComparisonCard } from '../components/ComparisonCard';
 import './ArticleDetailPage.css';
 
 export function ArticleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [article, setArticle] = useState<Article | null>(null);
+  const [comparison, setComparison] = useState<ComparisonData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -16,6 +18,16 @@ export function ArticleDetailPage() {
     api.getArticle(id)
       .then(setArticle)
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load article'));
+
+    // Load comparison data (may not exist for all articles)
+    api.getComparison(id)
+      .then(setComparison)
+      .catch((e) => {
+        // 404 is expected if article hasn't been processed yet
+        if (!(e instanceof ApiError && e.status === 404)) {
+          console.error('Failed to load comparison:', e);
+        }
+      });
   }, [id]);
 
   if (error) {
@@ -58,6 +70,9 @@ export function ArticleDetailPage() {
           <span>{article.source_name}</span>
           <span>{date}</span>
         </div>
+
+        {comparison && <ComparisonCard comparison={comparison} />}
+
         <hr className="detail__divider" />
         <div className="detail__summary">
           <MarkdownContent markdown={article.summary} />

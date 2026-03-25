@@ -208,6 +208,9 @@ func runServer() {
 			r.Use(auth.OptionalUser)
 			r.Get("/articles/feed", h.GetFeed)
 			r.Get("/articles/{articleID}", h.GetArticle)
+			r.Get("/articles/{articleID}/comparison", h.GetComparison)
+			r.Get("/articles/{articleID}/vote-stats", h.GetVoteStats)
+			r.Post("/articles/{articleID}/vote", h.SubmitVote)
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireUser)

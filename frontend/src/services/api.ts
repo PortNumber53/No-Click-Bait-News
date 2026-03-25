@@ -1,4 +1,4 @@
-import type { Article, ArticleFeed, AuthResponse, SubscriptionTier } from '../types';
+import type { Article, ArticleFeed, AuthResponse, ComparisonData, SubscriptionTier, VoteStats } from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -105,6 +105,34 @@ export const api = {
         headers: headers(true),
         body: JSON.stringify({ tier_id: tierId }),
       },
+    );
+  },
+
+  getComparison(articleId: string) {
+    return request<ComparisonData>(
+      `${API_BASE}/articles/${articleId}/comparison`,
+      { headers: headers(true) },
+    );
+  },
+
+  submitVote(articleId: string, chosenRewriteId: string, otherRewriteId: string) {
+    return request<VoteStats>(
+      `${API_BASE}/articles/${articleId}/vote`,
+      {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({
+          chosen_rewrite_id: chosenRewriteId,
+          other_rewrite_id: otherRewriteId,
+        }),
+      },
+    );
+  },
+
+  getVoteStats(articleId: string) {
+    return request<VoteStats>(
+      `${API_BASE}/articles/${articleId}/vote-stats`,
+      { headers: headers(true) },
     );
   },
 };

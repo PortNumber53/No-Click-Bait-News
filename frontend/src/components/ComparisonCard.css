@@ -1,0 +1,125 @@
+.comparison {
+  margin: 20px 0;
+  padding: 20px;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.comparison__header {
+  margin-bottom: 16px;
+}
+
+.comparison__label {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--on-surface);
+}
+
+.comparison__original {
+  font-size: 0.8125rem;
+  color: var(--on-surface-variant);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.comparison__original em {
+  font-style: italic;
+}
+
+.comparison__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .comparison__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison__version {
+  padding: 16px;
+  border: 2px solid var(--outline-variant);
+  border-radius: 10px;
+  transition: border-color 0.2s;
+}
+
+.comparison__version:not(.comparison__version--voted):hover {
+  border-color: var(--primary);
+}
+
+.comparison__version--chosen {
+  border-color: var(--primary);
+  background: var(--primary-container);
+}
+
+.comparison__version-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-surface-variant);
+}
+
+.comparison__version-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 8px 0;
+  line-height: 1.3;
+  color: var(--on-surface);
+}
+
+.comparison__version-summary {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--on-surface-variant);
+  margin: 0 0 12px;
+}
+
+.comparison__vote-btn {
+  width: 100%;
+  font-size: 0.8125rem;
+}
+
+.comparison__result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.comparison__bar-bg {
+  height: 6px;
+  background: var(--outline-variant);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.comparison__bar-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.comparison__stat {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.comparison__model {
+  font-size: 0.6875rem;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.comparison__your-pick {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

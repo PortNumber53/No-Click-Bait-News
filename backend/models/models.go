@@ -129,3 +129,40 @@ type CheckoutResponse struct {
 	CheckoutURL string `json:"checkout_url"`
 	SessionID   string `json:"session_id"`
 }
+
+// LLM comparison types
+
+type RewriteVersion struct {
+	ID      uuid.UUID `json:"id"`
+	Title   string    `json:"title"`
+	Summary string    `json:"summary"`
+	Content *string   `json:"content"`
+}
+
+type ComparisonResponse struct {
+	ArticleID     uuid.UUID      `json:"article_id"`
+	OriginalTitle string         `json:"original_title"`
+	SourceName    string         `json:"source_name"`
+	SourceURL     string         `json:"source_url"`
+	ImageURL      *string        `json:"image_url"`
+	Category      *string        `json:"category"`
+	PublishedAt   time.Time      `json:"published_at"`
+	VersionA      RewriteVersion `json:"version_a"`
+	VersionB      RewriteVersion `json:"version_b"`
+	UserVote      *string        `json:"user_vote"`
+}
+
+type VoteRequest struct {
+	ChosenRewriteID uuid.UUID `json:"chosen_rewrite_id"`
+	OtherRewriteID  uuid.UUID `json:"other_rewrite_id"`
+}
+
+type VoteStatsResponse struct {
+	ArticleID     uuid.UUID `json:"article_id"`
+	VersionAID    uuid.UUID `json:"version_a_id"`
+	VersionAName  string    `json:"version_a_name"`
+	VersionAVotes int       `json:"version_a_votes"`
+	VersionBID    uuid.UUID `json:"version_b_id"`
+	VersionBName  string    `json:"version_b_name"`
+	VersionBVotes int       `json:"version_b_votes"`
+}

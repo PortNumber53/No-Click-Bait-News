@@ -29,6 +29,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("seed tiers: %w", err)
 	}
 
+	if err := seedLLMModels(ctx, pool); err != nil {
+		return fmt.Errorf("seed llm models: %w", err)
+	}
+
 	if err := seedSampleArticles(ctx, pool); err != nil {
 		return fmt.Errorf("seed articles: %w", err)
 	}
@@ -102,6 +106,46 @@ var schemaDDL = []string{
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+
+	// LLM comparison system
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS original_title VARCHAR`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS original_summary TEXT`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'raw'`,
+
+	`CREATE TABLE IF NOT EXISTS llm_models (
+		id SERIAL PRIMARY KEY,
+		slug VARCHAR NOT NULL UNIQUE,
+		display_name VARCHAR NOT NULL,
+		openrouter_model_id VARCHAR NOT NULL,
+		is_active BOOLEAN NOT NULL DEFAULT true,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS article_rewrites (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		article_id UUID NOT NULL REFERENCES articles(id),
+		llm_model_id INTEGER NOT NULL REFERENCES llm_models(id),
+		rewritten_title VARCHAR NOT NULL,
+		rewritten_summary TEXT NOT NULL,
+		rewritten_content TEXT,
+		processing_status VARCHAR NOT NULL DEFAULT 'pending',
+		error_message TEXT,
+		prompt_tokens INTEGER,
+		completion_tokens INTEGER,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		UNIQUE(article_id, llm_model_id)
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS rewrite_votes (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		article_id UUID NOT NULL REFERENCES articles(id),
+		user_id UUID REFERENCES users(id),
+		chosen_rewrite_id UUID NOT NULL REFERENCES article_rewrites(id),
+		other_rewrite_id UUID NOT NULL REFERENCES article_rewrites(id),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS ix_rewrite_votes_user_article
+		ON rewrite_votes (article_id, user_id) WHERE user_id IS NOT NULL`,
 }
 
 func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
@@ -128,6 +172,27 @@ func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	log.Println("Subscription tiers seeded")
+	return nil
+}
+
+func seedLLMModels(ctx context.Context, pool *pgxpool.Pool) error {
+	models := []struct {
+		Slug, DisplayName, OpenRouterID string
+	}{
+		{"anthropic/claude-sonnet-4", "Claude Sonnet 4", "anthropic/claude-sonnet-4"},
+		{"openai/gpt-4o", "GPT-4o", "openai/gpt-4o"},
+	}
+	for _, m := range models {
+		_, err := pool.Exec(ctx,
+			`INSERT INTO llm_models (slug, display_name, openrouter_model_id)
+			 VALUES ($1, $2, $3) ON CONFLICT (slug) DO NOTHING`,
+			m.Slug, m.DisplayName, m.OpenRouterID,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	log.Println("LLM models seeded")
 	return nil
 }
 
