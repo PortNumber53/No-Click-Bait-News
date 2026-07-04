@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -51,17 +53,32 @@ var schemaDDL = []string{
 		title VARCHAR NOT NULL,
 		summary TEXT NOT NULL,
 		content TEXT,
+		original_content TEXT,
+		rewrite_status VARCHAR NOT NULL DEFAULT 'complete',
+		llm_rewrite_version INTEGER NOT NULL DEFAULT 0,
+		submitted_by_user_id UUID REFERENCES users(id),
 		source_name VARCHAR NOT NULL,
 		source_url VARCHAR NOT NULL,
 		image_url VARCHAR,
 		category VARCHAR,
+		categories TEXT[],
 		published_at TIMESTAMPTZ NOT NULL,
 		is_premium BOOLEAN NOT NULL DEFAULT false,
 		view_count INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS original_content TEXT`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS rewrite_status VARCHAR NOT NULL DEFAULT 'complete'`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS llm_rewrite_version INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS submitted_by_user_id UUID REFERENCES users(id)`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS categories TEXT[]`,
+	`UPDATE articles
+	 SET categories = ARRAY[category]
+	 WHERE categories IS NULL AND category IS NOT NULL AND category <> ''`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_category ON articles (category)`,
+	`CREATE INDEX IF NOT EXISTS ix_articles_categories ON articles USING GIN (categories)`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_published_at ON articles (published_at)`,
+	`CREATE INDEX IF NOT EXISTS ix_articles_submitted_by_user_id ON articles (submitted_by_user_id)`,
 
 	`CREATE TABLE IF NOT EXISTS subscription_tiers (
 		id SERIAL PRIMARY KEY,
@@ -89,10 +106,10 @@ var schemaDDL = []string{
 
 func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 	tiers := []struct {
-		Name             string
-		PriceMonthly     float64
+		Name              string
+		PriceMonthly      float64
 		MaxArticlesPerDay int
-		HasPremiumAccess bool
+		HasPremiumAccess  bool
 	}{
 		{"free", 0, 10, false},
 		{"basic", 4.99, 50, false},
@@ -115,6 +132,11 @@ func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func seedSampleArticles(ctx context.Context, pool *pgxpool.Pool) error {
+	if strings.ToLower(os.Getenv("SEED_SAMPLE_ARTICLES")) != "true" {
+		log.Println("Sample article seeding disabled")
+		return nil
+	}
+
 	// Only seed if no articles exist
 	var count int
 	pool.QueryRow(ctx, "SELECT COUNT(*) FROM articles").Scan(&count)

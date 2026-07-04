@@ -7,8 +7,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/stripe/stripe-go/v82"
-	"github.com/stripe/stripe-go/v82/customer"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/PortNumber53/no-click-bait-news/backend/models"
@@ -42,20 +40,6 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	userID := uuid.New()
 	now := time.Now().UTC()
 
-	// Create Stripe customer
-	stripe.Key = h.stripeKey
-	cust, err := customer.New(&stripe.CustomerParams{
-		Email: &req.Email,
-		Name:  &req.Name,
-		Params: stripe.Params{
-			Metadata: map[string]string{"user_id": userID.String()},
-		},
-	})
-	if err != nil {
-		Error(w, http.StatusInternalServerError, "Failed to create Stripe customer")
-		return
-	}
-
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Database error")
@@ -64,9 +48,9 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	_, err = tx.Exec(r.Context(),
-		`INSERT INTO users (id, email, hashed_password, name, stripe_customer_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		userID, req.Email, string(hashed), req.Name, cust.ID, now, now,
+		`INSERT INTO users (id, email, hashed_password, name, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		userID, req.Email, string(hashed), req.Name, now, now,
 	)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to create user")

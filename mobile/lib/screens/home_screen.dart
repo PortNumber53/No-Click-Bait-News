@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/article.dart';
 import '../providers/auth_provider.dart';
 import '../providers/news_provider.dart';
+import '../services/api_service.dart';
 import '../widgets/article_card.dart';
 import '../widgets/shimmer_card.dart';
 import 'article_detail_screen.dart';
+import 'my_urls_screen.dart';
 import 'subscription_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -17,6 +20,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _scrollController = ScrollController();
+  final _urlController = TextEditingController();
+  bool _isFetchingUrl = false;
 
   static const _categories = [
     null,
@@ -51,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _urlController.dispose();
     super.dispose();
   }
 
@@ -65,6 +71,35 @@ class _HomeScreenState extends State<HomeScreen> {
     await context.read<NewsProvider>().loadArticles(refresh: true);
   }
 
+  Future<void> _fetchUrl() async {
+    final url = _urlController.text.trim();
+    if (url.isEmpty || _isFetchingUrl) return;
+
+    setState(() => _isFetchingUrl = true);
+    try {
+      final data = await ApiService.fetchArticleUrl(url);
+      final article = Article.fromJson(data);
+      if (!mounted) return;
+      _urlController.clear();
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ArticleDetailScreen(article: article)),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to fetch URL')),
+      );
+    } finally {
+      if (mounted) setState(() => _isFetchingUrl = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -76,6 +111,16 @@ class _HomeScreenState extends State<HomeScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.link),
+            tooltip: 'My URLs',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const MyUrlsScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.workspace_premium_outlined),
             tooltip: 'Subscriptions',
@@ -95,6 +140,40 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _urlController,
+                    enabled: !_isFetchingUrl,
+                    keyboardType: TextInputType.url,
+                    textInputAction: TextInputAction.go,
+                    onSubmitted: (_) => _fetchUrl(),
+                    decoration: const InputDecoration(
+                      hintText: 'Paste news URL',
+                      prefixIcon: Icon(Icons.add_link),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  tooltip: 'Fetch URL',
+                  onPressed: _isFetchingUrl ? null : _fetchUrl,
+                  icon: _isFetchingUrl
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add),
+                ),
+              ],
+            ),
+          ),
           // Category filter chips
           Consumer<NewsProvider>(
             builder: (context, news, _) {

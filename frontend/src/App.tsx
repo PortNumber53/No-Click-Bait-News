@@ -6,6 +6,7 @@ import { ArticleDetailPage } from './pages/ArticleDetailPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SubscriptionPage } from './pages/SubscriptionPage';
+import { MyUrlsPage } from './pages/MyUrlsPage';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ function AppRoutes() {
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
         <Route path="/" element={<PrivateRoute><HomePage /></PrivateRoute>} />
+        <Route path="/my-urls" element={<PrivateRoute><MyUrlsPage /></PrivateRoute>} />
         <Route path="/article/:id" element={<PrivateRoute><ArticleDetailPage /></PrivateRoute>} />
         <Route path="/subscriptions" element={<PrivateRoute><SubscriptionPage /></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

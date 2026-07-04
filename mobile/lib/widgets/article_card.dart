@@ -18,6 +18,11 @@ class ArticleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = _timeAgo(article.publishedAt);
+    final categories = article.categories.isNotEmpty
+        ? article.categories
+        : article.category != null
+            ? [article.category!]
+            : const <String>[];
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -50,28 +55,51 @@ class ArticleCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (article.category != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            article.category!,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onPrimaryContainer,
-                            ),
-                          ),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final category in categories.take(3))
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.primaryContainer,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  category,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color:
+                                        theme.colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
+                      ),
                       if (article.isPremium) ...[
                         const SizedBox(width: 8),
-                        Icon(Icons.star,
-                            size: 16, color: theme.colorScheme.tertiary),
+                        Icon(
+                          Icons.star,
+                          size: 16,
+                          color: theme.colorScheme.tertiary,
+                        ),
                       ],
-                      const Spacer(),
+                      if (article.rewriteStatus == 'pending') ...[
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.hourglass_top,
+                          size: 16,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                      const SizedBox(width: 8),
                       Text(
                         timeAgo,
                         style: theme.textTheme.bodySmall?.copyWith(

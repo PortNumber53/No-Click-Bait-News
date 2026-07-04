@@ -6,7 +6,6 @@ from app.models.subscription import SubscriptionTier, UserSubscription
 from app.models.user import User
 from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserResponse
 from app.services.auth import create_access_token, hash_password, verify_password
-from app.services.stripe_service import create_stripe_customer
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -23,10 +22,6 @@ def register(data: UserCreate, db: Session = Depends(get_db)):
     )
     db.add(user)
     db.flush()
-
-    # Create Stripe customer
-    stripe_id = create_stripe_customer(user)
-    user.stripe_customer_id = stripe_id
 
     # Assign free tier
     free_tier = db.query(SubscriptionTier).filter(SubscriptionTier.name == "free").first()

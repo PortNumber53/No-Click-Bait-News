@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 .env
 server.env
-server/tmp/
+tmp/
 *.egg-info/
 dist/
 .venv/

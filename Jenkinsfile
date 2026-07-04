@@ -31,6 +31,17 @@ pipeline {
     STRIPE_WEBHOOK_SECRET_THIN     = credentials('prod-stripe-webhook-secret-thin-ncbnews')
     STRIPE_WEBHOOK_SECRET_SNAPSHOT = credentials('prod-stripe-webhook-secret-snapshot-ncbnews')
 
+    // TinyFish content fetching
+    TINYFISH_API_KEY = credentials('prod-tinyfish-api-key')
+
+    // OpenAI-compatible article rewriting
+    LLM_API_KEY  = credentials('prod-llm-api-key')
+    LLM_BASE_URL = credentials('prod-llm-base-url')
+    LLM_MODEL    = credentials('prod-llm-model')
+    LLM_REWRITE_WORKERS = '2'
+    LLM_REWRITE_QUEUE_SIZE = '100'
+    LLM_REWRITE_TIMEOUT_SECONDS = '300'
+
     // CORS
     ALLOWED_ORIGINS = credentials('prod-allowed-origins-ncbnews')
 
@@ -129,6 +140,13 @@ STRIPE_SECRET_KEY=${env.STRIPE_SECRET_KEY}
 STRIPE_WEBHOOK_SECRET=${env.STRIPE_WEBHOOK_SECRET}
 STRIPE_WEBHOOK_SECRET_THIN=${env.STRIPE_WEBHOOK_SECRET_THIN}
 STRIPE_WEBHOOK_SECRET_SNAPSHOT=${env.STRIPE_WEBHOOK_SECRET_SNAPSHOT}
+TINYFISH_API_KEY=${env.TINYFISH_API_KEY}
+LLM_API_KEY=${env.LLM_API_KEY}
+LLM_BASE_URL=${env.LLM_BASE_URL}
+LLM_MODEL=${env.LLM_MODEL}
+LLM_REWRITE_WORKERS=${env.LLM_REWRITE_WORKERS}
+LLM_REWRITE_QUEUE_SIZE=${env.LLM_REWRITE_QUEUE_SIZE}
+LLM_REWRITE_TIMEOUT_SECONDS=${env.LLM_REWRITE_TIMEOUT_SECONDS}
 ALLOWED_ORIGINS=${env.ALLOWED_ORIGINS}
 PORT=21011
 ENVFILE

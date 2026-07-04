@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { MarkdownContent } from '../components/MarkdownContent';
 import { api } from '../services/api';
 import type { Article } from '../types';
 import './ArticleDetailPage.css';
@@ -33,6 +34,9 @@ export function ArticleDetailPage() {
   const date = new Date(article.published_at).toLocaleDateString('en-US', {
     year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   });
+  const isRewritePending = article.rewrite_status === 'pending';
+  const isRewriteFailed = article.rewrite_status === 'failed';
+  const categories = article.categories?.length ? article.categories : article.category ? [article.category] : [];
 
   return (
     <div className="detail">
@@ -44,7 +48,9 @@ export function ArticleDetailPage() {
       <div className="detail__content">
         <button className="detail__back" onClick={() => navigate(-1)}>&larr; Back</button>
         <div className="detail__badges">
-          {article.category && <span className="detail__chip">{article.category}</span>}
+          {categories.slice(0, 3).map(category => (
+            <span key={category} className="detail__chip">{category}</span>
+          ))}
           {article.is_premium && <span className="detail__chip detail__chip--premium">&#9733; Premium</span>}
         </div>
         <h1 className="detail__title">{article.title}</h1>
@@ -53,8 +59,38 @@ export function ArticleDetailPage() {
           <span>{date}</span>
         </div>
         <hr className="detail__divider" />
-        <p className="detail__summary">{article.summary}</p>
-        {article.content && <div className="detail__body">{article.content}</div>}
+        <div className="detail__summary">
+          <MarkdownContent markdown={article.summary} />
+        </div>
+        {article.content && (
+          article.original_content ? (
+            <div className="detail__columns">
+              <section className="detail__column">
+                <h2 className="detail__column-title">AI Rewrite</h2>
+                {isRewritePending ? (
+                  <div className="detail__processing">
+                    <div className="spinner" />
+                    <span>Processing AI rewrite...</span>
+                  </div>
+                ) : isRewriteFailed ? (
+                  <div className="detail__processing detail__processing--failed">
+                    AI rewrite failed. The original article is still available.
+                  </div>
+                ) : (
+                  <MarkdownContent markdown={article.content} />
+                )}
+              </section>
+              <section className="detail__column detail__column--original">
+                <h2 className="detail__column-title">Original</h2>
+                <MarkdownContent markdown={article.original_content} />
+              </section>
+            </div>
+          ) : (
+            <div className="detail__body">
+              <MarkdownContent markdown={article.content} />
+            </div>
+          )
+        )}
         <a
           href={article.source_url}
           target="_blank"

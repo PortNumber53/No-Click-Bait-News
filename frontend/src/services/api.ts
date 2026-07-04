@@ -1,4 +1,4 @@
-import type { ArticleFeed, AuthResponse, SubscriptionTier } from '../types';
+import type { Article, ArticleFeed, AuthResponse, SubscriptionTier } from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -61,10 +61,32 @@ export const api = {
     );
   },
 
+  getMyArticles(page = 1, pageSize = 20) {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    });
+    return request<ArticleFeed>(
+      `${API_BASE}/articles/my?${params}`,
+      { headers: headers(true) },
+    );
+  },
+
   getArticle(id: string) {
-    return request<import('../types').Article>(
+    return request<Article>(
       `${API_BASE}/articles/${id}`,
       { headers: headers(true) },
+    );
+  },
+
+  fetchArticleUrl(url: string) {
+    return request<Article>(
+      `${API_BASE}/articles/fetch`,
+      {
+        method: 'POST',
+        headers: headers(true),
+        body: JSON.stringify({ url }),
+      },
     );
   },
 

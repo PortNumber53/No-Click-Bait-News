@@ -18,6 +18,8 @@ interface Props {
 }
 
 export function ArticleCard({ article, onClick }: Props) {
+  const categories = article.categories?.length ? article.categories : article.category ? [article.category] : [];
+
   return (
     <article className="article-card" onClick={onClick}>
       {article.image_url && (
@@ -27,9 +29,9 @@ export function ArticleCard({ article, onClick }: Props) {
       )}
       <div className="article-card__body">
         <div className="article-card__meta">
-          {article.category && (
-            <span className="article-card__category">{article.category}</span>
-          )}
+          {categories.slice(0, 3).map(category => (
+            <span key={category} className="article-card__category">{category}</span>
+          ))}
           {article.is_premium && (
             <span className="article-card__premium" title="Premium">&#9733;</span>
           )}

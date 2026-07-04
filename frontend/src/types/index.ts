@@ -3,10 +3,14 @@ export interface Article {
   title: string;
   summary: string;
   content?: string;
+  original_content?: string;
+  rewrite_status: 'pending' | 'complete' | 'failed' | string;
   source_name: string;
   source_url: string;
   image_url?: string;
   category?: string;
+  categories?: string[];
+  llm_rewrite_version: number;
   published_at: string;
   is_premium: boolean;
   view_count: number;

@@ -9,28 +9,32 @@ import (
 // Database models
 
 type User struct {
-	ID               uuid.UUID  `json:"id"`
-	Email            string     `json:"email"`
-	HashedPassword   string     `json:"-"`
-	Name             string     `json:"name"`
-	StripeCustomerID *string    `json:"stripe_customer_id,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID               uuid.UUID `json:"id"`
+	Email            string    `json:"email"`
+	HashedPassword   string    `json:"-"`
+	Name             string    `json:"name"`
+	StripeCustomerID *string   `json:"stripe_customer_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type Article struct {
-	ID          uuid.UUID  `json:"id"`
-	Title       string     `json:"title"`
-	Summary     string     `json:"summary"`
-	Content     *string    `json:"content"`
-	SourceName  string     `json:"source_name"`
-	SourceURL   string     `json:"source_url"`
-	ImageURL    *string    `json:"image_url"`
-	Category    *string    `json:"category"`
-	PublishedAt time.Time  `json:"published_at"`
-	IsPremium   bool       `json:"is_premium"`
-	ViewCount   int        `json:"view_count"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID                uuid.UUID `json:"id"`
+	Title             string    `json:"title"`
+	Summary           string    `json:"summary"`
+	Content           *string   `json:"content"`
+	OriginalContent   *string   `json:"original_content,omitempty"`
+	RewriteStatus     string    `json:"rewrite_status"`
+	LLMRewriteVersion int       `json:"llm_rewrite_version"`
+	SourceName        string    `json:"source_name"`
+	SourceURL         string    `json:"source_url"`
+	ImageURL          *string   `json:"image_url"`
+	Category          *string   `json:"category"`
+	Categories        []string  `json:"categories"`
+	PublishedAt       time.Time `json:"published_at"`
+	IsPremium         bool      `json:"is_premium"`
+	ViewCount         int       `json:"view_count"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type SubscriptionTier struct {
@@ -66,6 +70,10 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type FetchArticleRequest struct {
+	URL string `json:"url"`
+}
+
 type UserResponse struct {
 	ID               uuid.UUID `json:"id"`
 	Email            string    `json:"email"`
@@ -81,17 +89,21 @@ type TokenResponse struct {
 }
 
 type ArticleResponse struct {
-	ID          uuid.UUID  `json:"id"`
-	Title       string     `json:"title"`
-	Summary     string     `json:"summary"`
-	Content     *string    `json:"content"`
-	SourceName  string     `json:"source_name"`
-	SourceURL   string     `json:"source_url"`
-	ImageURL    *string    `json:"image_url"`
-	Category    *string    `json:"category"`
-	PublishedAt time.Time  `json:"published_at"`
-	IsPremium   bool       `json:"is_premium"`
-	ViewCount   int        `json:"view_count"`
+	ID                uuid.UUID `json:"id"`
+	Title             string    `json:"title"`
+	Summary           string    `json:"summary"`
+	Content           *string   `json:"content"`
+	OriginalContent   *string   `json:"original_content,omitempty"`
+	RewriteStatus     string    `json:"rewrite_status"`
+	LLMRewriteVersion int       `json:"llm_rewrite_version"`
+	SourceName        string    `json:"source_name"`
+	SourceURL         string    `json:"source_url"`
+	ImageURL          *string   `json:"image_url"`
+	Category          *string   `json:"category"`
+	Categories        []string  `json:"categories"`
+	PublishedAt       time.Time `json:"published_at"`
+	IsPremium         bool      `json:"is_premium"`
+	ViewCount         int       `json:"view_count"`
 }
 
 type FeedResponse struct {
@@ -102,11 +114,11 @@ type FeedResponse struct {
 }
 
 type TierResponse struct {
-	ID               int     `json:"id"`
-	Name             string  `json:"name"`
-	PriceMonthly     float64 `json:"price_monthly"`
-	MaxArticlesPerDay int    `json:"max_articles_per_day"`
-	HasPremiumAccess bool    `json:"has_premium_access"`
+	ID                int     `json:"id"`
+	Name              string  `json:"name"`
+	PriceMonthly      float64 `json:"price_monthly"`
+	MaxArticlesPerDay int     `json:"max_articles_per_day"`
+	HasPremiumAccess  bool    `json:"has_premium_access"`
 }
 
 type CheckoutRequest struct {

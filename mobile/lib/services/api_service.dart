@@ -90,6 +90,39 @@ class ApiService {
     throw ApiException(response.statusCode, 'Failed to fetch article');
   }
 
+  static Future<Map<String, dynamic>> fetchArticleUrl(String url) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/articles/fetch'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({'url': url}),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body);
+    }
+    final body = jsonDecode(response.body);
+    throw ApiException(
+      response.statusCode,
+      body['detail'] ?? 'Failed to fetch URL',
+    );
+  }
+
+  static Future<Map<String, dynamic>> getMyArticles({
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final params = {
+      'page': page.toString(),
+      'page_size': pageSize.toString(),
+    };
+    final uri =
+        Uri.parse('$baseUrl/articles/my').replace(queryParameters: params);
+    final response = await http.get(uri, headers: await _headers(auth: true));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw ApiException(response.statusCode, 'Failed to fetch submitted URLs');
+  }
+
   // Subscriptions
   static Future<List<dynamic>> getSubscriptionTiers() async {
     final response = await http.get(

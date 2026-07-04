@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 
@@ -23,9 +25,16 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	// Subcommand: migrate
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		runMigrate()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "fetch-content" {
+		runFetchContent()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "crawl-news" {
+		runCrawlNews()
 		return
 	}
 
@@ -49,6 +58,79 @@ func runMigrate() {
 		log.Fatalf("Migration failed: %v", err)
 	}
 	log.Println("Migrations completed successfully")
+}
+
+func runFetchContent() {
+	dbURL := mustEnv("DATABASE_URL")
+	limit := 100
+	if len(os.Args) > 2 {
+		parsed, err := strconv.Atoi(os.Args[2])
+		if err != nil || parsed < 1 {
+			log.Fatalf("Usage: %s fetch-content [positive-limit]", os.Args[0])
+		}
+		limit = parsed
+	}
+
+	tinyFish, err := services.NewTinyFishClientFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid TinyFish configuration: %v", err)
+	}
+	if tinyFish == nil {
+		log.Fatal("Required environment variable TINYFISH_API_KEY not set")
+	}
+
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	stats, err := services.BackfillArticleContent(context.Background(), pool, tinyFish, limit)
+	if err != nil {
+		log.Fatalf("Fetch article content failed: %v", err)
+	}
+	log.Printf("Article content fetch complete: checked=%d updated=%d failed=%d", stats.Checked, stats.Updated, stats.Failed)
+}
+
+func runCrawlNews() {
+	dbURL := mustEnv("DATABASE_URL")
+	limit := 25
+	if len(os.Args) > 2 {
+		parsed, err := strconv.Atoi(os.Args[2])
+		if err != nil || parsed < 1 {
+			log.Fatalf("Usage: %s crawl-news [positive-limit]", os.Args[0])
+		}
+		limit = parsed
+	}
+
+	tinyFish, err := services.NewTinyFishClientFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid TinyFish configuration: %v", err)
+	}
+	if tinyFish == nil {
+		log.Fatal("Required environment variable TINYFISH_API_KEY not set")
+	}
+
+	articleRewriter, err := services.NewArticleRewriterFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid LLM rewrite configuration: %v", err)
+	}
+	if articleRewriter == nil {
+		log.Println("LLM article rewriting disabled for crawler: LLM_API_KEY and LLM_MODEL are not set")
+	}
+
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("Unable to connect to database: %v", err)
+	}
+	defer pool.Close()
+
+	start := time.Now()
+	stats, err := services.CrawlMajorNews(context.Background(), pool, tinyFish, articleRewriter, limit)
+	if err != nil {
+		log.Fatalf("News crawl failed: %v", err)
+	}
+	log.Printf("News crawl complete: feeds=%d urls=%d inserted=%d skipped=%d rewritten=%d failed=%d elapsed=%s", stats.FeedsChecked, stats.URLsFound, stats.Inserted, stats.Skipped, stats.Rewritten, stats.Failed, time.Since(start))
 }
 
 func runServer() {
@@ -84,7 +166,23 @@ func runServer() {
 	}
 
 	auth := middleware.NewAuth(jwtSecret, pool)
-	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecret, webhookSecretThin, webhookSecretSnapshot)
+	tinyFish, err := services.NewTinyFishClientFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid TinyFish configuration: %v", err)
+	}
+	if tinyFish == nil {
+		log.Println("TinyFish content fetching disabled: TINYFISH_API_KEY is not set")
+	}
+
+	articleRewriter, err := services.NewArticleRewriterFromEnv()
+	if err != nil {
+		log.Fatalf("Invalid LLM rewrite configuration: %v", err)
+	}
+	if articleRewriter == nil {
+		log.Println("LLM article rewriting disabled: LLM_API_KEY and LLM_MODEL are not set")
+	}
+
+	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecret, webhookSecretThin, webhookSecretSnapshot, tinyFish, articleRewriter)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -110,6 +208,11 @@ func runServer() {
 			r.Use(auth.OptionalUser)
 			r.Get("/articles/feed", h.GetFeed)
 			r.Get("/articles/{articleID}", h.GetArticle)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireUser)
+			r.Get("/articles/my", h.GetMyArticles)
+			r.Post("/articles/fetch", h.FetchArticle)
 		})
 
 		// Subscriptions

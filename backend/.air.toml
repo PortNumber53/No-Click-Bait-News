@@ -4,7 +4,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  cmd = "go build -o ./tmp/server ."
+  cmd = "go build -o ./tmp/server . && ./tmp/server migrate"
   bin = "./tmp/server"
   full_bin = "./tmp/server"
   include_ext = ["go"]

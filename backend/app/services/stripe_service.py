@@ -8,23 +8,11 @@ from app.models.user import User
 stripe.api_key = STRIPE_SECRET_KEY
 
 
-def create_stripe_customer(user: User) -> str:
-    customer = stripe.Customer.create(
-        email=user.email,
-        name=user.name,
-        metadata={"user_id": str(user.id)},
-    )
-    return customer.id
-
-
 def create_checkout_session(
     user: User, tier: SubscriptionTier, success_url: str, cancel_url: str
 ) -> stripe.checkout.Session:
-    if not user.stripe_customer_id:
-        raise ValueError("User has no Stripe customer ID")
-
     session = stripe.checkout.Session.create(
-        customer=user.stripe_customer_id,
+        customer_email=user.email,
         payment_method_types=["card"],
         line_items=[{"price": tier.stripe_price_id, "quantity": 1}],
         mode="subscription",
