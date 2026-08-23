@@ -37,7 +37,7 @@ pipeline {
     LLM_API_KEY  = credentials('prod-llm-api-key')
     LLM_BASE_URL = credentials('prod-llm-base-url')
     LLM_MODEL    = credentials('prod-llm-model')
-    LLM_MODELS = 'auto,gpt-oss-120b'
+    LLM_MODELS = 'gpt-oss-120b,auto'
     LLM_REWRITE_WORKERS = '1'
     LLM_REWRITE_TIMEOUT_SECONDS = '300'
     LLM_REWRITE_STALE_ON_START_LIMIT = '100'

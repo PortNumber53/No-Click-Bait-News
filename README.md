@@ -80,7 +80,7 @@ For FreeLLMAPI, map the Hermes-style model config like this:
 ```bash
 LLM_BASE_URL=https://freellmapi.example.com/v1
 LLM_API_KEY=freellmapi-your-key
-LLM_MODELS=auto,gpt-oss-120b
+LLM_MODELS=gpt-oss-120b,auto
 ```
 
 Expose the API over HTTPS, restrict ingress to the backend host, and keep its raw
