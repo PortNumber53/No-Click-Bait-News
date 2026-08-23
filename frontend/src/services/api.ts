@@ -1,4 +1,4 @@
-import type { Article, ArticleFeed, AuthResponse, ComparisonData, SubscriptionTier, VoteStats } from '../types';
+import type { Article, ArticleFeed, AuthResponse, ComparisonData, SubscriptionTier, User, VoteStats } from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -18,6 +18,11 @@ function headers(auth = false): Record<string, string> {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new ApiError(res.status, body.detail ?? 'Request failed');
   }
@@ -49,7 +54,13 @@ export const api = {
     });
   },
 
-  getFeed(page = 1, pageSize = 20, category?: string) {
+  getMe() {
+    return request<User>(`${API_BASE}/auth/me`, {
+      headers: headers(true),
+    });
+  },
+
+  getFeed(page = 1, pageSize = 20, category?: string, signal?: AbortSignal) {
     const params = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
@@ -57,7 +68,7 @@ export const api = {
     if (category) params.set('category', category);
     return request<ArticleFeed>(
       `${API_BASE}/articles/feed?${params}`,
-      { headers: headers(true) },
+      { headers: headers(true), signal },
     );
   },
 

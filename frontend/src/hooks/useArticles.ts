@@ -10,10 +10,12 @@ export function useArticles() {
   const [selectedCategory, setSelectedCategory] = useState<string | undefined>();
   const pageRef = useRef(1);
   const loadingRef = useRef(false);
+  const generationRef = useRef(0);
 
-  const loadArticles = useCallback(async (refresh = false) => {
+  const loadArticles = useCallback(async (refresh = false, signal?: AbortSignal) => {
     if (loadingRef.current && !refresh) return;
     if (!refresh && !hasMore) return;
+    const generation = refresh ? ++generationRef.current : generationRef.current;
 
     loadingRef.current = true;
     setIsLoading(true);
@@ -22,15 +24,19 @@ export function useArticles() {
     const page = refresh ? 1 : pageRef.current;
 
     try {
-      const feed = await api.getFeed(page, 20, selectedCategory);
+      const feed = await api.getFeed(page, 20, selectedCategory, signal);
+      if (generation !== generationRef.current) return;
       setArticles(prev => refresh ? feed.articles : [...prev, ...feed.articles]);
       setHasMore(feed.has_more);
       pageRef.current = page + 1;
     } catch (e) {
+      if (signal?.aborted || generation !== generationRef.current) return;
       setError(e instanceof Error ? e.message : 'Failed to load articles');
     } finally {
-      setIsLoading(false);
-      loadingRef.current = false;
+      if (generation === generationRef.current) {
+        setIsLoading(false);
+        loadingRef.current = false;
+      }
     }
   }, [selectedCategory, hasMore]);
 
@@ -43,7 +49,9 @@ export function useArticles() {
   }, [selectedCategory]);
 
   useEffect(() => {
-    loadArticles(true);
+    const controller = new AbortController();
+    loadArticles(true, controller.signal);
+    return () => controller.abort();
   }, [selectedCategory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { articles, isLoading, hasMore, error, selectedCategory, changeCategory, loadArticles };

@@ -9,23 +9,25 @@ export function SubscriptionPage() {
   const [tiers, setTiers] = useState<SubscriptionTier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [subscribing, setSubscribing] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getSubscriptionTiers()
       .then(setTiers)
-      .catch(() => {})
+      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load subscription plans'))
       .finally(() => setIsLoading(false));
   }, []);
 
   const subscribe = async (tier: SubscriptionTier) => {
     setSubscribing(tier.id);
+    setError(null);
     try {
       const data = await api.createCheckout(tier.id);
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
       }
-    } catch {
-      // handled silently
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start checkout');
     } finally {
       setSubscribing(null);
     }
@@ -41,6 +43,7 @@ export function SubscriptionPage() {
         <button className="detail__back" onClick={() => navigate(-1)}>&larr; Back</button>
         <h1 className="sub__title">Subscription Plans</h1>
       </div>
+      {error && <p className="home__error" role="alert">{error}</p>}
       <div className="sub__grid">
         {tiers.map(tier => {
           const isPremium = tier.name === 'premium';

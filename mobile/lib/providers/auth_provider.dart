@@ -21,6 +21,8 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.getMe();
       if (data != null) {
         _user = User.fromJson(data);
+      } else {
+        await ApiService.clearToken();
       }
     } catch (_) {
       // Token invalid/expired — stay logged out, clear stale token
@@ -40,14 +42,16 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.login(email, password);
       await ApiService.saveToken(data['access_token']);
       _user = User.fromJson(data['user']);
-      _isLoading = false;
-      notifyListeners();
       return true;
     } on ApiException catch (e) {
       _error = e.message;
+      return false;
+    } catch (_) {
+      _error = 'Could not connect to the news service';
+      return false;
+    } finally {
       _isLoading = false;
       notifyListeners();
-      return false;
     }
   }
 
@@ -59,14 +63,16 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.register(email, password, name);
       await ApiService.saveToken(data['access_token']);
       _user = User.fromJson(data['user']);
-      _isLoading = false;
-      notifyListeners();
       return true;
     } on ApiException catch (e) {
       _error = e.message;
+      return false;
+    } catch (_) {
+      _error = 'Could not connect to the news service';
+      return false;
+    } finally {
       _isLoading = false;
       notifyListeners();
-      return false;
     }
   }
 

@@ -70,7 +70,9 @@ func (a *Auth) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := a.parseToken(r)
 		if err != nil || user == nil {
-			http.Error(w, `{"detail":"Not authenticated"}`, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"detail":"Not authenticated"}`))
 			return
 		}
 		ctx := context.WithValue(r.Context(), UserKey, user)

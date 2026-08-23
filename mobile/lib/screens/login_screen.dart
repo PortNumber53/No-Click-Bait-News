@@ -100,7 +100,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       prefixIcon: Icon(Icons.lock_outlined),
                     ),
                     validator: (v) =>
-                        v != null && v.length >= 6 ? null : 'Min 6 characters',
+                        v != null && v.length >= 8 ? null : 'Min 8 characters',
                   ),
                   const SizedBox(height: 24),
                   Consumer<AuthProvider>(

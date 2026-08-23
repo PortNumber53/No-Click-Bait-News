@@ -18,10 +18,29 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	log.Println("Connected to database")
 
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin schema migration: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+		version VARCHAR PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`); err != nil {
+		return fmt.Errorf("create migration ledger: %w", err)
+	}
 	for _, ddl := range schemaDDL {
-		if _, err := pool.Exec(ctx, ddl); err != nil {
+		if _, err := tx.Exec(ctx, ddl); err != nil {
 			return fmt.Errorf("schema migration: %w", err)
 		}
+	}
+	if _, err := tx.Exec(ctx,
+		"INSERT INTO schema_migrations (version) VALUES ('go-schema-2026-08-22') ON CONFLICT DO NOTHING",
+	); err != nil {
+		return fmt.Errorf("record schema migration: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit schema migration: %w", err)
 	}
 	log.Println("Schema up to date")
 
@@ -107,6 +126,38 @@ var schemaDDL = []string{
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+
+	`CREATE TABLE IF NOT EXISTS user_article_reads (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+		read_date DATE NOT NULL DEFAULT CURRENT_DATE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, article_id, read_date)
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_article_reads_user_date
+		ON user_article_reads (user_id, read_date)`,
+	`CREATE TABLE IF NOT EXISTS user_url_fetches (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		source_url TEXT NOT NULL,
+		fetch_date DATE NOT NULL DEFAULT CURRENT_DATE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, source_url, fetch_date)
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_url_fetches_user_date
+		ON user_url_fetches (user_id, fetch_date)`,
+
+	`CREATE TABLE IF NOT EXISTS article_rewrite_jobs (
+		article_id UUID PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+		status VARCHAR NOT NULL DEFAULT 'pending',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		locked_at TIMESTAMPTZ,
+		last_error TEXT,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_article_rewrite_jobs_ready
+		ON article_rewrite_jobs (status, available_at)`,
 
 	// Ensure articles.id has a default (may be missing on older tables)
 	`ALTER TABLE articles ALTER COLUMN id SET DEFAULT gen_random_uuid()`,

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/PortNumber53/no-click-bait-news/backend/middleware"
 	"github.com/PortNumber53/no-click-bait-news/backend/models"
+	"github.com/PortNumber53/no-click-bait-news/backend/services"
 )
 
 const userSubmittedCategory = "Submitted"
@@ -32,6 +32,7 @@ type articleRewriteJob struct {
 	Title           string
 	SourceURL       string
 	OriginalContent string
+	Attempts        int
 }
 
 func (h *Handler) startArticleRewriteWorkers() {
@@ -41,40 +42,59 @@ func (h *Handler) startArticleRewriteWorkers() {
 	}
 
 	workerCount := intEnv("LLM_REWRITE_WORKERS", 2)
-	queueSize := intEnv("LLM_REWRITE_QUEUE_SIZE", 100)
-	h.rewriteJobs = make(chan articleRewriteJob, queueSize)
+	h.rewriteWake = make(chan struct{}, 1)
 
 	for workerID := 1; workerID <= workerCount; workerID++ {
 		go h.articleRewriteWorker(workerID)
 	}
 
-	log.Printf("[articles.rewrite.queue] status=started workers=%d queue_size=%d", workerCount, queueSize)
+	log.Printf("[articles.rewrite.queue] status=started workers=%d backend=postgres", workerCount)
 	go h.enqueueStaleArticleRewrites()
 }
 
 func (h *Handler) articleRewriteWorker(workerID int) {
-	for job := range h.rewriteJobs {
-		h.processArticleRewriteJob(workerID, job)
+	for {
+		job, found, err := h.claimArticleRewriteJob(context.Background())
+		if err != nil {
+			log.Printf("[articles.rewrite.queue] worker=%d status=claim_failed error=%q", workerID, err)
+		} else if found {
+			h.processArticleRewriteJob(workerID, job)
+			continue
+		}
+		select {
+		case <-h.rewriteWake:
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 
 func (h *Handler) enqueueStaleArticleRewrites() {
-	if h.articleRewriter == nil || h.rewriteJobs == nil {
+	if h.articleRewriter == nil || h.rewriteWake == nil {
 		return
 	}
 
 	limit := intEnv("LLM_REWRITE_STALE_ON_START_LIMIT", 100)
 	targetVersion := h.articleRewriter.AgentVersion()
+	configuredModels := h.configuredRewriteModels()
 	rows, err := h.pool.Query(context.Background(),
 		`SELECT id, title, source_url, original_content
 		 FROM articles
 		 WHERE original_content IS NOT NULL
 		   AND btrim(original_content) <> ''
-		   AND rewrite_status <> 'pending'
-		   AND llm_rewrite_version < $1
+		   AND (
+		     llm_rewrite_version < $1
+		     OR (
+		       SELECT COUNT(DISTINCT lm.slug)
+		       FROM article_rewrites ar
+		       JOIN llm_models lm ON lm.id = ar.llm_model_id
+		       WHERE ar.article_id = articles.id
+		         AND ar.processing_status = 'completed'
+		         AND lm.slug = ANY($3::text[])
+		     ) < $4
+		   )
 		 ORDER BY published_at DESC
 		 LIMIT $2`,
-		targetVersion, limit,
+		targetVersion, limit, configuredModels, len(configuredModels),
 	)
 	if err != nil {
 		log.Printf("[articles.rewrite.queue] status=stale_scan_failed target_version=%d error=%q", targetVersion, err)
@@ -90,23 +110,9 @@ func (h *Handler) enqueueStaleArticleRewrites() {
 			log.Printf("[articles.rewrite.queue] status=stale_scan_row_failed target_version=%d error=%q", targetVersion, err)
 			continue
 		}
-		tag, err := h.pool.Exec(context.Background(),
-			`UPDATE articles
-			 SET rewrite_status = 'pending'
-			 WHERE id = $1
-			   AND rewrite_status <> 'pending'
-			   AND llm_rewrite_version < $2`,
-			articleID, targetVersion,
-		)
-		if err != nil {
-			log.Printf("[articles.rewrite.queue] article_id=%s status=stale_mark_failed target_version=%d error=%q", articleID, targetVersion, err)
-			continue
+		if h.enqueueArticleRewrite(articleID, title, sourceURL, originalContent) {
+			queued++
 		}
-		if tag.RowsAffected() == 0 {
-			continue
-		}
-		h.enqueueArticleRewrite(articleID, title, sourceURL, originalContent)
-		queued++
 	}
 	if err := rows.Err(); err != nil {
 		log.Printf("[articles.rewrite.queue] status=stale_scan_iter_failed target_version=%d error=%q", targetVersion, err)
@@ -129,14 +135,12 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	hasPremium := false
 	user := middleware.GetUser(r.Context())
 	if user != nil {
-		var premiumAccess *bool
-		h.pool.QueryRow(r.Context(),
-			`SELECT st.has_premium_access FROM user_subscriptions us
-			 JOIN subscription_tiers st ON st.id = us.tier_id
-			 WHERE us.user_id = $1`, user.ID,
-		).Scan(&premiumAccess)
-		if premiumAccess != nil {
-			hasPremium = *premiumAccess
+		var err error
+		hasPremium, err = h.hasPremiumAccess(r.Context(), user.ID)
+		if err != nil {
+			log.Printf("[feed] premium lookup failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Failed to check article access")
+			return
 		}
 	}
 
@@ -252,21 +256,35 @@ func (h *Handler) GetMyArticles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.ArticleResponse) {
+	if len(articles) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, len(articles))
+	indexByID := make(map[uuid.UUID]int, len(articles))
 	for i := range articles {
-		rwRows, err := h.pool.Query(ctx,
-			`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
-			 FROM article_rewrites ar
-			 JOIN llm_models lm ON lm.id = ar.llm_model_id
-			 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
-			 ORDER BY ar.llm_model_id`, articles[i].ID)
-		if err == nil {
-			for rwRows.Next() {
-				var rv models.RewriteVersion
-				if err := rwRows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err == nil {
-					articles[i].Rewrites = append(articles[i].Rewrites, rv)
-				}
-			}
-			rwRows.Close()
+		ids[i] = articles[i].ID
+		indexByID[articles[i].ID] = i
+	}
+	rows, err := h.pool.Query(ctx,
+		`SELECT ar.article_id, ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+		 FROM article_rewrites ar
+		 JOIN llm_models lm ON lm.id = ar.llm_model_id
+		 WHERE ar.article_id = ANY($1::uuid[]) AND ar.processing_status = 'completed'
+		 ORDER BY ar.article_id, ar.llm_model_id`, ids)
+	if err != nil {
+		log.Printf("[articles.rewrites] status=query_failed error=%q", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var articleID uuid.UUID
+		var rv models.RewriteVersion
+		if err := rows.Scan(&articleID, &rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
+			log.Printf("[articles.rewrites] status=scan_failed error=%q", err)
+			continue
+		}
+		if index, ok := indexByID[articleID]; ok {
+			articles[index].Rewrites = append(articles[index].Rewrites, rv)
 		}
 	}
 }
@@ -296,14 +314,25 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 			Error(w, http.StatusForbidden, "Premium subscription required")
 			return
 		}
-		var hasPremium bool
-		h.pool.QueryRow(r.Context(),
-			`SELECT COALESCE(st.has_premium_access, false) FROM user_subscriptions us
-			 JOIN subscription_tiers st ON st.id = us.tier_id
-			 WHERE us.user_id = $1`, user.ID,
-		).Scan(&hasPremium)
+		hasPremium, err := h.hasPremiumAccess(r.Context(), user.ID)
+		if err != nil {
+			Error(w, http.StatusInternalServerError, "Failed to check article access")
+			return
+		}
 		if !hasPremium {
 			Error(w, http.StatusForbidden, "Premium subscription required")
+			return
+		}
+	}
+	if user := middleware.GetUser(r.Context()); user != nil {
+		allowed, err := h.recordArticleRead(r.Context(), user.ID, articleID)
+		if err != nil {
+			log.Printf("[articles.read] user_id=%s article_id=%s status=usage_failed error=%q", user.ID, articleID, err)
+			Error(w, http.StatusInternalServerError, "Failed to record article usage")
+			return
+		}
+		if !allowed {
+			Error(w, http.StatusTooManyRequests, "Daily article limit reached")
 			return
 		}
 	}
@@ -350,13 +379,12 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req models.FetchArticleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("[articles.fetch] request_id=%s status=bad_request error=%q", requestID, err)
-		Error(w, http.StatusBadRequest, "Invalid request body")
+	if !DecodeJSON(w, r, &req) {
+		log.Printf("[articles.fetch] request_id=%s status=bad_request", requestID)
 		return
 	}
 
-	sourceURL, sourceName, err := normalizeNewsURL(req.URL)
+	sourceURL, sourceName, err := normalizeNewsURL(r.Context(), req.URL)
 	if err != nil {
 		log.Printf("[articles.fetch] request_id=%s status=invalid_url error=%q", requestID, err)
 		Error(w, http.StatusBadRequest, err.Error())
@@ -379,6 +407,21 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 		}
 		h.enqueueArticleRewriteIfOutdated(r.Context(), &existing)
 		JSON(w, http.StatusOK, existing)
+		return
+	}
+	user := middleware.GetUser(r.Context())
+	if user == nil {
+		Error(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+	allowed, err := h.reserveURLFetch(r.Context(), user.ID, sourceURL)
+	if err != nil {
+		log.Printf("[articles.fetch] request_id=%s status=usage_failed user_id=%s error=%q", requestID, user.ID, err)
+		Error(w, http.StatusInternalServerError, "Failed to record URL fetch usage")
+		return
+	}
+	if !allowed {
+		Error(w, http.StatusTooManyRequests, "Daily URL fetch limit reached")
 		return
 	}
 
@@ -431,56 +474,109 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) enqueueArticleRewrite(articleID uuid.UUID, title, sourceURL, originalContent string) {
-	if h.articleRewriter == nil || h.rewriteJobs == nil {
+func (h *Handler) enqueueArticleRewrite(articleID uuid.UUID, title, sourceURL, originalContent string) bool {
+	if h.articleRewriter == nil || h.rewriteWake == nil {
 		log.Printf("[articles.rewrite.queue] article_id=%s status=skipped reason=not_configured", articleID)
-		return
+		return false
 	}
-
-	job := articleRewriteJob{
-		ArticleID:       articleID,
-		Title:           title,
-		SourceURL:       sourceURL,
-		OriginalContent: originalContent,
+	if strings.TrimSpace(originalContent) == "" {
+		return false
 	}
-
+	tag, err := h.pool.Exec(context.Background(),
+		`INSERT INTO article_rewrite_jobs (article_id, status, attempts, available_at, locked_at, last_error, updated_at)
+		 VALUES ($1, 'pending', 0, NOW(), NULL, NULL, NOW())
+		 ON CONFLICT (article_id) DO UPDATE SET
+		   status = 'pending', attempts = 0, available_at = NOW(), locked_at = NULL, last_error = NULL, updated_at = NOW()
+		 WHERE article_rewrite_jobs.status IN ('completed', 'failed')`, articleID)
+	if err != nil {
+		log.Printf("[articles.rewrite.queue] article_id=%s status=persist_failed url=%q error=%q", articleID, sourceURL, err)
+		return false
+	}
+	_, _ = h.pool.Exec(context.Background(), "UPDATE articles SET rewrite_status = 'pending' WHERE id = $1", articleID)
 	select {
-	case h.rewriteJobs <- job:
-		log.Printf("[articles.rewrite.queue] article_id=%s status=queued url=%q queue_depth=%d", articleID, sourceURL, len(h.rewriteJobs))
+	case h.rewriteWake <- struct{}{}:
 	default:
-		log.Printf("[articles.rewrite.queue] article_id=%s status=dropped reason=queue_full url=%q queue_depth=%d", articleID, sourceURL, len(h.rewriteJobs))
 	}
+	log.Printf("[articles.rewrite.queue] article_id=%s status=persisted url=%q changed=%v", articleID, sourceURL, tag.RowsAffected() > 0)
+	return true
 }
 
 func (h *Handler) enqueueArticleRewriteIfOutdated(ctx context.Context, article *models.ArticleResponse) {
-	if h.articleRewriter == nil || h.rewriteJobs == nil || article == nil || article.OriginalContent == nil {
+	if h.articleRewriter == nil || h.rewriteWake == nil || article == nil || article.OriginalContent == nil {
 		return
 	}
 	originalContent := strings.TrimSpace(*article.OriginalContent)
-	if originalContent == "" || article.RewriteStatus == "pending" || article.LLMRewriteVersion >= h.articleRewriter.AgentVersion() {
+	if originalContent == "" {
 		return
 	}
-
-	tag, err := h.pool.Exec(ctx,
-		`UPDATE articles
-		 SET rewrite_status = 'pending'
-		 WHERE id = $1
-		   AND original_content IS NOT NULL
-		   AND rewrite_status <> 'pending'
-		   AND llm_rewrite_version < $2`,
-		article.ID, h.articleRewriter.AgentVersion(),
-	)
-	if err != nil {
-		log.Printf("[articles.rewrite.queue] article_id=%s status=stale_check_failed error=%q", article.ID, err)
-		return
+	configuredModels := h.configuredRewriteModels()
+	if article.LLMRewriteVersion >= h.articleRewriter.AgentVersion() {
+		var completedModels int
+		err := h.pool.QueryRow(ctx,
+			`SELECT COUNT(DISTINCT lm.slug)
+			 FROM article_rewrites ar
+			 JOIN llm_models lm ON lm.id = ar.llm_model_id
+			 WHERE ar.article_id = $1
+			   AND ar.processing_status = 'completed'
+			   AND lm.slug = ANY($2::text[])`,
+			article.ID, configuredModels,
+		).Scan(&completedModels)
+		if err == nil && completedModels >= len(configuredModels) {
+			return
+		}
+		if err != nil {
+			log.Printf("[articles.rewrite.queue] article_id=%s status=model_coverage_check_failed error=%q", article.ID, err)
+		}
 	}
-	if tag.RowsAffected() == 0 {
-		return
-	}
-
 	article.RewriteStatus = "pending"
-	log.Printf("[articles.rewrite.queue] article_id=%s status=outdated current_version=%d target_version=%d", article.ID, article.LLMRewriteVersion, h.articleRewriter.AgentVersion())
+	log.Printf("[articles.rewrite.queue] article_id=%s status=outdated current_version=%d target_version=%d configured_models=%d", article.ID, article.LLMRewriteVersion, h.articleRewriter.AgentVersion(), len(configuredModels))
 	h.enqueueArticleRewrite(article.ID, article.Title, article.SourceURL, originalContent)
+}
+
+func (h *Handler) configuredRewriteModels() []string {
+	models := make([]string, 0, len(h.articleRewriters))
+	for _, rewriter := range h.articleRewriters {
+		models = append(models, rewriter.Model())
+	}
+	return models
+}
+
+func (h *Handler) claimArticleRewriteJob(ctx context.Context) (articleRewriteJob, bool, error) {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return articleRewriteJob{}, false, err
+	}
+	defer tx.Rollback(ctx)
+
+	var job articleRewriteJob
+	err = tx.QueryRow(ctx,
+		`SELECT j.article_id, a.title, a.source_url, a.original_content, j.attempts
+		 FROM article_rewrite_jobs j
+		 JOIN articles a ON a.id = j.article_id
+		 WHERE (j.status = 'pending' AND j.available_at <= NOW())
+		    OR (j.status = 'running' AND j.locked_at < NOW() - INTERVAL '10 minutes')
+		 ORDER BY j.available_at, j.created_at
+		 FOR UPDATE OF j SKIP LOCKED
+		 LIMIT 1`,
+	).Scan(&job.ArticleID, &job.Title, &job.SourceURL, &job.OriginalContent, &job.Attempts)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return articleRewriteJob{}, false, nil
+		}
+		return articleRewriteJob{}, false, err
+	}
+	job.Attempts++
+	if _, err := tx.Exec(ctx,
+		`UPDATE article_rewrite_jobs
+		 SET status = 'running', attempts = $2, locked_at = NOW(), updated_at = NOW()
+		 WHERE article_id = $1`, job.ArticleID, job.Attempts,
+	); err != nil {
+		return articleRewriteJob{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return articleRewriteJob{}, false, err
+	}
+	return job, true, nil
 }
 
 func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) {
@@ -490,28 +586,127 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 	ctx, cancel := context.WithTimeout(context.Background(), rewriteTimeoutFromEnv())
 	defer cancel()
 
-	rewrite, err := h.articleRewriter.RewriteArticle(ctx, job.Title, job.SourceURL, job.OriginalContent)
-	if err != nil {
-		log.Printf("[articles.rewrite] worker=%d article_id=%s status=failed url=%q error=%q elapsed_ms=%d", workerID, job.ArticleID, job.SourceURL, err, time.Since(start).Milliseconds())
-		_, _ = h.pool.Exec(context.Background(), "UPDATE articles SET rewrite_status = 'failed' WHERE id = $1", job.ArticleID)
+	type generatedRewrite struct {
+		Rewriter *services.ArticleRewriter
+		Result   services.ArticleRewriteResult
+	}
+	generated := make([]generatedRewrite, 0, len(h.articleRewriters))
+	for _, rewriter := range h.articleRewriters {
+		rewrite, err := rewriter.RewriteArticle(ctx, job.Title, job.SourceURL, job.OriginalContent)
+		if err != nil {
+			log.Printf("[articles.rewrite] worker=%d article_id=%s model=%q status=failed url=%q error=%q elapsed_ms=%d", workerID, job.ArticleID, rewriter.Model(), job.SourceURL, err, time.Since(start).Milliseconds())
+			h.failArticleRewriteJob(job, err)
+			return
+		}
+		if rewrite.Title == "" {
+			rewrite.Title = job.Title
+		}
+		if rewrite.Summary == "" {
+			rewrite.Summary = chooseArticleSummary(nil, rewrite.Content)
+		}
+		generated = append(generated, generatedRewrite{Rewriter: rewriter, Result: rewrite})
+	}
+	if len(generated) == 0 {
+		h.failArticleRewriteJob(job, fmt.Errorf("no rewrite models are configured"))
 		return
 	}
 
-	summary := chooseArticleSummary(nil, rewrite.Content)
-	category := models.PrimaryArticleCategory(rewrite.Categories, nil)
-	tag, err := h.pool.Exec(ctx,
+	primary := generated[0].Result
+	category := models.PrimaryArticleCategory(primary.Categories, nil)
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		h.failArticleRewriteJob(job, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx,
 		`UPDATE articles
-		 SET content = $1, summary = $2, category = $3, categories = $4, rewrite_status = 'complete', llm_rewrite_version = $5
-		 WHERE id = $6 AND original_content IS NOT NULL`,
-		rewrite.Content, summary, category, rewrite.Categories, h.articleRewriter.AgentVersion(), job.ArticleID,
+		 SET original_title = COALESCE(original_title, title),
+		     original_summary = COALESCE(original_summary, summary),
+		     title = $1, content = $2, summary = $3, category = $4, categories = $5,
+		     rewrite_status = 'complete', llm_rewrite_version = $6
+		 WHERE id = $7 AND original_content IS NOT NULL`,
+		primary.Title, primary.Content, primary.Summary, category, primary.Categories, h.articleRewriter.AgentVersion(), job.ArticleID,
 	)
 	if err != nil {
 		log.Printf("[articles.rewrite] worker=%d article_id=%s status=update_failed url=%q error=%q elapsed_ms=%d", workerID, job.ArticleID, job.SourceURL, err, time.Since(start).Milliseconds())
-		_, _ = h.pool.Exec(context.Background(), "UPDATE articles SET rewrite_status = 'failed' WHERE id = $1", job.ArticleID)
+		_ = tx.Rollback(ctx)
+		h.failArticleRewriteJob(job, err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		_ = tx.Rollback(ctx)
+		h.failArticleRewriteJob(job, fmt.Errorf("article is no longer available for rewriting"))
+		return
+	}
+	for _, item := range generated {
+		var modelID int
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO llm_models (slug, display_name, openrouter_model_id, is_active)
+			 VALUES ($1, $1, $1, true)
+			 ON CONFLICT (slug) DO UPDATE SET openrouter_model_id = EXCLUDED.openrouter_model_id
+			 RETURNING id`, item.Rewriter.Model(),
+		).Scan(&modelID); err != nil {
+			_ = tx.Rollback(ctx)
+			h.failArticleRewriteJob(job, err)
+			return
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO article_rewrites
+			 (article_id, llm_model_id, rewritten_title, rewritten_summary, rewritten_content, processing_status)
+			 VALUES ($1, $2, $3, $4, $5, 'completed')
+			 ON CONFLICT (article_id, llm_model_id) DO UPDATE SET
+			 rewritten_title = EXCLUDED.rewritten_title,
+			 rewritten_summary = EXCLUDED.rewritten_summary,
+			 rewritten_content = EXCLUDED.rewritten_content,
+			 processing_status = 'completed', error_message = NULL`,
+			job.ArticleID, modelID, item.Result.Title, item.Result.Summary, item.Result.Content,
+		); err != nil {
+			_ = tx.Rollback(ctx)
+			h.failArticleRewriteJob(job, err)
+			return
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE article_rewrite_jobs
+		 SET status = 'completed', locked_at = NULL, last_error = NULL, updated_at = NOW()
+		 WHERE article_id = $1`, job.ArticleID,
+	); err != nil {
+		_ = tx.Rollback(ctx)
+		h.failArticleRewriteJob(job, err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		h.failArticleRewriteJob(job, err)
 		return
 	}
 
-	log.Printf("[articles.rewrite] worker=%d article_id=%s status=completed url=%q rows=%d output_bytes=%d categories=%q elapsed_ms=%d", workerID, job.ArticleID, job.SourceURL, tag.RowsAffected(), len(rewrite.Content), strings.Join(rewrite.Categories, ","), time.Since(start).Milliseconds())
+	log.Printf("[articles.rewrite] worker=%d article_id=%s status=completed url=%q rows=%d models=%d output_bytes=%d categories=%q elapsed_ms=%d", workerID, job.ArticleID, job.SourceURL, tag.RowsAffected(), len(generated), len(primary.Content), strings.Join(primary.Categories, ","), time.Since(start).Milliseconds())
+}
+
+func (h *Handler) failArticleRewriteJob(job articleRewriteJob, jobErr error) {
+	maxAttempts := intEnv("LLM_REWRITE_MAX_ATTEMPTS", 3)
+	if job.Attempts >= maxAttempts {
+		_, _ = h.pool.Exec(context.Background(),
+			`WITH failed_job AS (
+				UPDATE article_rewrite_jobs
+				SET status = 'failed', locked_at = NULL, last_error = $2, updated_at = NOW()
+				WHERE article_id = $1
+			)
+			UPDATE articles SET rewrite_status = 'failed' WHERE id = $1`,
+			job.ArticleID, truncateRunes(jobErr.Error(), 2000))
+		return
+	}
+	delay := time.Duration(job.Attempts*job.Attempts) * 5 * time.Second
+	_, _ = h.pool.Exec(context.Background(),
+		`UPDATE article_rewrite_jobs
+		 SET status = 'pending', available_at = $2, locked_at = NULL, last_error = $3, updated_at = NOW()
+		 WHERE article_id = $1`,
+		job.ArticleID, time.Now().UTC().Add(delay), truncateRunes(jobErr.Error(), 2000))
+	select {
+	case h.rewriteWake <- struct{}{}:
+	default:
+	}
 }
 
 func (h *Handler) findArticleBySourceURL(r *http.Request, sourceURL string) (models.ArticleResponse, bool, error) {
@@ -532,10 +727,13 @@ func (h *Handler) findArticleBySourceURL(r *http.Request, sourceURL string) (mod
 	return article, true, nil
 }
 
-func normalizeNewsURL(raw string) (string, string, error) {
+func normalizeNewsURL(ctx context.Context, raw string) (string, string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", "", fmt.Errorf("URL is required")
+	}
+	if len(raw) > 2048 {
+		return "", "", fmt.Errorf("URL is too long")
 	}
 
 	parsed, err := url.Parse(raw)
@@ -545,6 +743,9 @@ func normalizeNewsURL(raw string) (string, string, error) {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", "", fmt.Errorf("Only HTTP and HTTPS URLs are supported")
 	}
+	if parsed.User != nil {
+		return "", "", fmt.Errorf("URLs with embedded credentials are not supported")
+	}
 
 	host := strings.ToLower(parsed.Hostname())
 	if host == "" {
@@ -553,12 +754,42 @@ func normalizeNewsURL(raw string) (string, string, error) {
 	if host == "localhost" {
 		return "", "", fmt.Errorf("Private network URLs are not supported")
 	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
-		return "", "", fmt.Errorf("Private network URLs are not supported")
+	if ip := net.ParseIP(host); ip != nil {
+		if !isPublicIP(ip) {
+			return "", "", fmt.Errorf("Private network URLs are not supported")
+		}
+	} else {
+		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil || len(addresses) == 0 {
+			return "", "", fmt.Errorf("Could not resolve URL host")
+		}
+		for _, address := range addresses {
+			if !isPublicIP(address.IP) {
+				return "", "", fmt.Errorf("Private network URLs are not supported")
+			}
+		}
 	}
 
 	parsed.Fragment = ""
 	return parsed.String(), strings.TrimPrefix(host, "www."), nil
+}
+
+func isPublicIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return false
+	}
+	for _, cidr := range []string{
+		"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24",
+		"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4",
+		"2001:db8::/32",
+	} {
+		_, blocked, _ := net.ParseCIDR(cidr)
+		if blocked.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func chooseArticleTitle(title *string, sourceURL string) string {

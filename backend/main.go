@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -173,15 +176,17 @@ func runServer() {
 		log.Println("TinyFish content fetching disabled: TINYFISH_API_KEY is not set")
 	}
 
-	articleRewriter, err := services.NewArticleRewriterFromEnv()
+	articleRewriters, err := services.NewArticleRewritersFromEnv()
 	if err != nil {
 		log.Fatalf("Invalid LLM rewrite configuration: %v", err)
 	}
-	if articleRewriter == nil {
+	if len(articleRewriters) == 0 {
 		log.Println("LLM article rewriting disabled: LLM_API_KEY and LLM_MODEL are not set")
+	} else {
+		log.Printf("LLM article rewriting enabled: models=%d", len(articleRewriters))
 	}
 
-	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecretThin, webhookSecretSnapshot, tinyFish, articleRewriter)
+	h := handlers.New(pool, jwtSecret, stripeKey, webhookSecretThin, webhookSecretSnapshot, tinyFish, articleRewriters)
 
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
@@ -199,8 +204,9 @@ func runServer() {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// Auth
-		r.Post("/auth/register", h.Register)
-		r.Post("/auth/login", h.Login)
+		authLimiter := middleware.NewRateLimiter(20, 10*time.Minute)
+		r.With(authLimiter.Handler).Post("/auth/register", h.Register)
+		r.With(authLimiter.Handler).Post("/auth/login", h.Login)
 
 		// Articles & Subscriptions (optional auth)
 		r.Group(func(r chi.Router) {
@@ -233,7 +239,27 @@ func runServer() {
 
 	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	log.Printf("Server listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, r))
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+	shutdownSignal := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-shutdownSignal
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Server shutdown failed: %v", err)
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }
 
 func mustEnv(key string) string {

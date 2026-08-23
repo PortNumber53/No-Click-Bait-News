@@ -1,8 +1,9 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
+	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,18 +16,30 @@ import (
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req models.RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		Error(w, http.StatusBadRequest, "Invalid request body")
+	if !DecodeJSON(w, r, &req) {
 		return
 	}
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Email == "" || req.Password == "" || req.Name == "" {
 		Error(w, http.StatusBadRequest, "Email, password, and name are required")
+		return
+	}
+	if len(req.Email) > 254 || len(req.Name) > 100 || len(req.Password) < 8 || len(req.Password) > 72 {
+		Error(w, http.StatusBadRequest, "Use a valid email and an 8-72 character password")
+		return
+	}
+	if parsed, err := mail.ParseAddress(req.Email); err != nil || parsed.Address != req.Email {
+		Error(w, http.StatusBadRequest, "Enter a valid email address")
 		return
 	}
 
 	// Check if email already exists
 	var exists bool
-	h.pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	if err := h.pool.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists); err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to check email availability")
+		return
+	}
 	if exists {
 		Error(w, http.StatusBadRequest, "Email already registered")
 		return
@@ -61,12 +74,17 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	// Assign free tier
 	var freeTierID int
 	err = tx.QueryRow(r.Context(), "SELECT id FROM subscription_tiers WHERE name = 'free'").Scan(&freeTierID)
-	if err == nil {
-		_, _ = tx.Exec(r.Context(),
-			`INSERT INTO user_subscriptions (id, user_id, tier_id, status, created_at, updated_at)
-			 VALUES ($1, $2, $3, 'active', $4, $5)`,
-			uuid.New(), userID, freeTierID, now, now,
-		)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to assign subscription tier")
+		return
+	}
+	if _, err := tx.Exec(r.Context(),
+		`INSERT INTO user_subscriptions (id, user_id, tier_id, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, 'active', $4, $5)`,
+		uuid.New(), userID, freeTierID, now, now,
+	); err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to assign subscription tier")
+		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -96,10 +114,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req models.LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		Error(w, http.StatusBadRequest, "Invalid request body")
+	if !DecodeJSON(w, r, &req) {
 		return
 	}
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	var user models.User
 	var tierName *string
@@ -148,9 +166,12 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 
 	var tierName *string
 	h.pool.QueryRow(r.Context(),
-		`SELECT st.name FROM user_subscriptions us
-		 JOIN subscription_tiers st ON st.id = us.tier_id
-		 WHERE us.user_id = $1`, user.ID,
+		`SELECT COALESCE(
+			(SELECT st.name FROM user_subscriptions us
+			 JOIN subscription_tiers st ON st.id = us.tier_id
+			 WHERE us.user_id = $1 AND us.status IN ('active', 'trialing')),
+			'free'
+		)`, user.ID,
 	).Scan(&tierName)
 
 	JSON(w, http.StatusOK, models.UserResponse{
@@ -165,6 +186,8 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createToken(userID uuid.UUID) (string, error) {
 	claims := jwt.MapClaims{
 		"sub": userID.String(),
+		"iss": "no-click-bait-news",
+		"iat": time.Now().Unix(),
 		"exp": time.Now().Add(7 * 24 * time.Hour).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

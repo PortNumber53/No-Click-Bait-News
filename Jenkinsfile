@@ -38,11 +38,11 @@ pipeline {
     LLM_BASE_URL = credentials('prod-llm-base-url')
     LLM_MODEL    = credentials('prod-llm-model')
     LLM_REWRITE_WORKERS = '2'
-    LLM_REWRITE_QUEUE_SIZE = '100'
     LLM_REWRITE_TIMEOUT_SECONDS = '300'
 
     // CORS
-    ALLOWED_ORIGINS = credentials('prod-allowed-origins-ncbnews')
+    ALLOWED_ORIGINS        = credentials('prod-allowed-origins-ncbnews')
+    CHECKOUT_RETURN_ORIGIN = 'https://ncbnews.truvis.co'
 
     // Cloudflare
     CF_API_TOKEN          = credentials('cloudflare-api-token')
@@ -57,6 +57,51 @@ pipeline {
       steps {
         checkout scm
         sh 'git rev-parse --short HEAD'
+      }
+    }
+
+    stage('Quality Gates') {
+      parallel {
+        stage('Backend tests') {
+          steps {
+            dir('backend') {
+              sh '''
+                set -euo pipefail
+                go vet ./...
+                go test -race ./...
+              '''
+            }
+          }
+        }
+        stage('Frontend checks') {
+          steps {
+            dir('frontend') {
+              sh '''
+                set -euo pipefail
+                npm ci
+                npm run lint
+                npm audit
+                npx wrangler types --check
+                npm run build
+              '''
+            }
+          }
+        }
+        stage('Mobile checks') {
+          when {
+            expression { sh(script: 'command -v flutter >/dev/null 2>&1', returnStatus: true) == 0 }
+          }
+          steps {
+            dir('mobile') {
+              sh '''
+                set -euo pipefail
+                flutter pub get
+                flutter analyze --no-pub
+                flutter test --no-pub
+              '''
+            }
+          }
+        }
       }
     }
 
@@ -118,56 +163,57 @@ pipeline {
       steps {
         unstash "bin-amd64"
         sshagent(credentials: [env.SSH_CREDENTIALS]) {
-          sh label: 'Upload & install', script: """
+          sh label: 'Upload & install', script: '''
 set -euo pipefail
 BIN_LOCAL="artifacts/api-ncbnews-backend-linux-amd64"
 
 # Upload binary to /tmp on target
-scp "\$BIN_LOCAL" grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend
+scp "$BIN_LOCAL" "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend"
 
 # Generate systemd unit file
-bash deploy/generate-ncbnews-backend-service.sh "${env.TARGET_DIR}" api-ncbnews-backend.service
+bash deploy/generate-ncbnews-backend-service.sh "$TARGET_DIR" api-ncbnews-backend.service
 
 # Upload unit file
-scp api-ncbnews-backend.service grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend.service
+scp api-ncbnews-backend.service "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.service"
 
-# Generate .env for the service
-cat > /tmp/api-ncbnews-backend.env <<ENVFILE
-DATABASE_URL=${env.DATABASE_URL}
-JWT_SECRET_KEY=${env.JWT_SECRET_KEY}
-STRIPE_SECRET_KEY=${env.STRIPE_SECRET_KEY}
-STRIPE_WEBHOOK_SECRET_SNAPSHOT=${env.STRIPE_WEBHOOK_SECRET_SNAPSHOT}
-TINYFISH_API_KEY=${env.TINYFISH_API_KEY}
-LLM_API_KEY=${env.LLM_API_KEY}
-LLM_BASE_URL=${env.LLM_BASE_URL}
-LLM_MODEL=${env.LLM_MODEL}
-LLM_REWRITE_WORKERS=${env.LLM_REWRITE_WORKERS}
-LLM_REWRITE_QUEUE_SIZE=${env.LLM_REWRITE_QUEUE_SIZE}
-LLM_REWRITE_TIMEOUT_SECONDS=${env.LLM_REWRITE_TIMEOUT_SECONDS}
-STRIPE_WEBHOOK_SECRET_THIN=${env.STRIPE_WEBHOOK_SECRET_THIN}
-ALLOWED_ORIGINS=${env.ALLOWED_ORIGINS}
-PORT=21011
-ENVFILE
-scp /tmp/api-ncbnews-backend.env grimlock@${env.TARGET_HOST}:/tmp/api-ncbnews-backend.env
+# Generate a dotenv file without interpolating credentials into this Jenkins script.
+node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
+scp /tmp/api-ncbnews-backend.env "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.env"
 rm -f /tmp/api-ncbnews-backend.env
 
-# Stop service, replace binary, restart
-ssh grimlock@${env.TARGET_HOST} "
+# Stop service, replace binary, restart, and roll back if health verification fails.
+ssh "grimlock@$TARGET_HOST" "
   set -euo pipefail
-  sudo systemctl stop ${env.SERVICE_NAME} 2>/dev/null || true
-  sudo mkdir -p ${env.TARGET_DIR} ${env.TARGET_DIR}/logs
-  sudo chown -R grimlock:grimlock ${env.TARGET_DIR}
-  sudo mv /tmp/api-ncbnews-backend ${env.TARGET_DIR}/api-ncbnews-backend
-  sudo mv /tmp/api-ncbnews-backend.env ${env.TARGET_DIR}/.env
-  sudo chown grimlock:grimlock ${env.TARGET_DIR}/api-ncbnews-backend ${env.TARGET_DIR}/.env
-  sudo chmod 0755 ${env.TARGET_DIR}/api-ncbnews-backend
-  sudo chmod 0600 ${env.TARGET_DIR}/.env
-  sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/${env.SERVICE_NAME}.service
+  sudo systemctl stop $SERVICE_NAME 2>/dev/null || true
+  sudo mkdir -p $TARGET_DIR $TARGET_DIR/logs
+  sudo chown -R grimlock:grimlock $TARGET_DIR
+  if [ -f $TARGET_DIR/api-ncbnews-backend ]; then
+    cp $TARGET_DIR/api-ncbnews-backend $TARGET_DIR/api-ncbnews-backend.previous
+  fi
+  sudo mv /tmp/api-ncbnews-backend $TARGET_DIR/api-ncbnews-backend
+  sudo mv /tmp/api-ncbnews-backend.env $TARGET_DIR/.env
+  sudo chown grimlock:grimlock $TARGET_DIR/api-ncbnews-backend $TARGET_DIR/.env
+  sudo chmod 0755 $TARGET_DIR/api-ncbnews-backend
+  sudo chmod 0600 $TARGET_DIR/.env
+  sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/$SERVICE_NAME.service
   sudo systemctl daemon-reload
-  sudo systemctl enable ${env.SERVICE_NAME}
-  sudo systemctl start ${env.SERVICE_NAME}
+  sudo systemctl enable $SERVICE_NAME
+  sudo systemctl start $SERVICE_NAME
+  healthy=false
+  for attempt in 1 2 3 4 5 6; do
+    if curl --fail --silent http://127.0.0.1:21011/health >/dev/null; then healthy=true; break; fi
+    sleep 2
+  done
+  if [ \"\$healthy\" != true ]; then
+    sudo systemctl stop $SERVICE_NAME || true
+    if [ -f $TARGET_DIR/api-ncbnews-backend.previous ]; then
+      mv $TARGET_DIR/api-ncbnews-backend.previous $TARGET_DIR/api-ncbnews-backend
+      sudo systemctl start $SERVICE_NAME
+    fi
+    exit 1
+  fi
 "
-          """
+          '''
         }
       }
     }

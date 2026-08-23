@@ -95,7 +95,12 @@ func BackfillArticleContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *T
 			}
 
 			for _, id := range ids {
-				tag, err := pool.Exec(ctx, "UPDATE articles SET content = $1, rewrite_status = 'complete' WHERE id = $2", content, id)
+				tag, err := pool.Exec(ctx,
+					`UPDATE articles
+					 SET content = $1, original_content = $1, rewrite_status = 'pending', llm_rewrite_version = 0
+					 WHERE id = $2`,
+					content, id,
+				)
 				if err != nil {
 					stats.Failed++
 					continue

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/article.dart';
 import '../services/api_service.dart';
@@ -9,6 +11,7 @@ class NewsProvider extends ChangeNotifier {
   int _currentPage = 1;
   String? _selectedCategory;
   String? _error;
+  int _generation = 0;
 
   List<Article> get articles => List.unmodifiable(_articles);
   bool get isLoading => _isLoading;
@@ -17,8 +20,9 @@ class NewsProvider extends ChangeNotifier {
   String? get error => _error;
 
   Future<void> loadArticles({bool refresh = false}) async {
-    if (_isLoading) return;
+    if (_isLoading && !refresh) return;
     if (!refresh && !_hasMore) return;
+    final generation = refresh ? ++_generation : _generation;
 
     if (refresh) {
       _currentPage = 1;
@@ -36,46 +40,58 @@ class NewsProvider extends ChangeNotifier {
         category: _selectedCategory,
       );
       final feed = ArticleFeed.fromJson(data);
+      if (generation != _generation) return;
       final startIndex = _articles.length;
       _articles.addAll(feed.articles);
       _hasMore = feed.hasMore;
       _currentPage++;
-      _isLoading = false;
       notifyListeners();
 
-      // Fetch LLM versions for each new article concurrently — fire and forget
-      _fetchComparisons(startIndex, feed.articles.length);
+      final articleIds = _articles
+          .skip(startIndex)
+          .take(feed.articles.length)
+          .map((article) => article.id)
+          .toList();
+      unawaited(_fetchComparisons(articleIds, generation));
     } on ApiException catch (e) {
+      if (generation != _generation) return;
       _error = e.message;
-      _isLoading = false;
-      notifyListeners();
     } catch (e) {
+      if (generation != _generation) return;
       _error = 'Failed to load articles';
-      _isLoading = false;
-      notifyListeners();
+    } finally {
+      if (generation == _generation) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> _fetchComparisons(int startIndex, int count) async {
-    final futures = <Future<void>>[];
-    for (int i = startIndex; i < startIndex + count; i++) {
-      futures.add(_fetchComparison(i));
-    }
+  Future<void> _fetchComparisons(
+      List<String> articleIds, int generation) async {
+    final futures = articleIds
+        .map((articleId) => _fetchComparison(articleId, generation))
+        .toList();
     await Future.wait(futures, eagerError: false);
   }
 
-  Future<void> _fetchComparison(int index) async {
+  Future<void> _fetchComparison(String articleId, int generation) async {
     try {
-      final article = _articles[index];
-      final data = await ApiService.getComparison(article.id);
+      final initialIndex =
+          _articles.indexWhere((article) => article.id == articleId);
+      if (initialIndex < 0) return;
+      final article = _articles[initialIndex];
+      final data = await ApiService.getComparison(articleId);
       if (data == null) return;
+      if (generation != _generation) return;
 
       final versionA = data['version_a'] as Map<String, dynamic>?;
       final versionB = data['version_b'] as Map<String, dynamic>?;
       if (versionA == null || versionB == null) return;
 
       // Original is always the first tab so readers can compare honestly
-      final original = article.versions.isNotEmpty ? article.versions.first : null;
+      final original =
+          article.versions.isNotEmpty ? article.versions.first : null;
       final originalVersion = original != null
           ? ArticleVersion(
               modelName: 'Original',
@@ -104,8 +120,11 @@ class NewsProvider extends ChangeNotifier {
         ),
       ];
 
-      if (index < _articles.length) {
-        _articles[index] = _articles[index].withVersions(versions);
+      final currentIndex =
+          _articles.indexWhere((candidate) => candidate.id == articleId);
+      if (currentIndex >= 0) {
+        _articles[currentIndex] =
+            _articles[currentIndex].withVersions(versions);
         notifyListeners();
       }
     } catch (_) {
@@ -116,6 +135,6 @@ class NewsProvider extends ChangeNotifier {
   void setCategory(String? category) {
     if (_selectedCategory == category) return;
     _selectedCategory = category;
-    loadArticles(refresh: true);
+    unawaited(loadArticles(refresh: true));
   }
 }

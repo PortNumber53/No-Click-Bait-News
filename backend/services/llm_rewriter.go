@@ -35,6 +35,8 @@ type ArticleRewriter struct {
 type ArticleRewriteResult struct {
 	Content    string   `json:"content"`
 	Categories []string `json:"categories"`
+	Title      string   `json:"title,omitempty"`
+	Summary    string   `json:"summary,omitempty"`
 }
 
 type chatCompletionRequest struct {
@@ -56,16 +58,31 @@ type chatCompletionResponse struct {
 }
 
 func NewArticleRewriterFromEnv() (*ArticleRewriter, error) {
+	rewriters, err := NewArticleRewritersFromEnv()
+	if err != nil || len(rewriters) == 0 {
+		return nil, err
+	}
+	return rewriters[0], nil
+}
+
+func NewArticleRewritersFromEnv() ([]*ArticleRewriter, error) {
 	apiKey := strings.TrimSpace(os.Getenv("LLM_API_KEY"))
-	model := strings.TrimSpace(os.Getenv("LLM_MODEL"))
-	if apiKey == "" && model == "" {
+	modelsRaw := strings.TrimSpace(os.Getenv("LLM_MODELS"))
+	if modelsRaw == "" {
+		modelsRaw = strings.TrimSpace(os.Getenv("LLM_MODEL"))
+	}
+	if apiKey == "" && modelsRaw == "" {
 		return nil, nil
 	}
 	if apiKey == "" {
-		return nil, errors.New("LLM_API_KEY is required when LLM_MODEL is set")
+		return nil, errors.New("LLM_API_KEY is required when LLM_MODEL or LLM_MODELS is set")
 	}
-	if model == "" {
+	if modelsRaw == "" {
 		return nil, errors.New("LLM_MODEL is required when LLM_API_KEY is set")
+	}
+	models := uniqueNonEmptyStrings(strings.Split(modelsRaw, ","))
+	if len(models) == 0 {
+		return nil, errors.New("at least one LLM model is required")
 	}
 
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("LLM_BASE_URL")), "/")
@@ -91,7 +108,24 @@ func NewArticleRewriterFromEnv() (*ArticleRewriter, error) {
 		maxTokens = parsed
 	}
 
-	return NewArticleRewriter(apiKey, baseURL, model, temperature, maxTokens, nil), nil
+	rewriters := make([]*ArticleRewriter, 0, len(models))
+	for _, model := range models {
+		rewriters = append(rewriters, NewArticleRewriter(apiKey, baseURL, model, temperature, maxTokens, nil))
+	}
+	return rewriters, nil
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func NewArticleRewriter(apiKey, baseURL, model string, temperature float64, maxTokens int, httpClient *http.Client) *ArticleRewriter {
@@ -124,6 +158,13 @@ func (r *ArticleRewriter) AgentVersion() int {
 	return ArticleRewriteAgentVersion
 }
 
+func (r *ArticleRewriter) Model() string {
+	if r == nil {
+		return ""
+	}
+	return r.model
+}
+
 func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, originalMarkdown string) (ArticleRewriteResult, error) {
 	if r == nil {
 		return ArticleRewriteResult{}, errors.New("article rewriter is not configured")
@@ -150,6 +191,8 @@ Rules:
 
 JSON shape:
 {
+	"title": "direct factual headline",
+	"summary": "2-4 sentence factual summary",
   "content": "rewritten article markdown",
   "categories": ["Business", "Technology"]
 }
@@ -229,6 +272,8 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 	}
 
 	result.Content = strings.TrimSpace(result.Content)
+	result.Title = strings.TrimSpace(result.Title)
+	result.Summary = strings.TrimSpace(result.Summary)
 	if result.Content == "" {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite content was empty")
 	}

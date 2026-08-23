@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth-context';
 import './AuthPage.css';
 
 export function RegisterPage() {
@@ -53,7 +53,7 @@ export function RegisterPage() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={8}
           />
         </label>
 

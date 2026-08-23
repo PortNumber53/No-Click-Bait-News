@@ -1,9 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/json"
 	"math/big"
 	"net/http"
 
@@ -33,26 +33,10 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all completed rewrites for this article, including model display name
-	rows, err := h.pool.Query(r.Context(),
-		`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
-		 FROM article_rewrites ar
-		 JOIN llm_models lm ON lm.id = ar.llm_model_id
-		 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
-		 ORDER BY ar.llm_model_id`, articleID)
+	rewrites, err := h.loadCompletedRewrites(r.Context(), articleID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to fetch rewrites")
 		return
-	}
-	defer rows.Close()
-
-	var rewrites []models.RewriteVersion
-	for rows.Next() {
-		var rv models.RewriteVersion
-		if err := rows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
-			continue
-		}
-		rewrites = append(rewrites, rv)
 	}
 
 	if len(rewrites) < 2 {
@@ -81,7 +65,7 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 			if chosenID == resp.VersionA.ID {
 				v := "a"
 				resp.UserVote = &v
-			} else {
+			} else if chosenID == resp.VersionB.ID {
 				v := "b"
 				resp.UserVote = &v
 			}
@@ -105,8 +89,28 @@ func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req models.VoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		Error(w, http.StatusBadRequest, "Invalid request body")
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.ChosenRewriteID == req.OtherRewriteID {
+		Error(w, http.StatusBadRequest, "Rewrite choices must be distinct")
+		return
+	}
+	rewrites, err := h.loadCompletedRewrites(r.Context(), articleID)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to validate rewrite choices")
+		return
+	}
+	if len(rewrites) < 2 {
+		Error(w, http.StatusBadRequest, "Comparison is not available")
+		return
+	}
+	idxA, idxB := pickPair(articleID.String()+user.ID.String(), len(rewrites))
+	expectedA, expectedB := rewrites[idxA].ID, rewrites[idxB].ID
+	validPair := (req.ChosenRewriteID == expectedA && req.OtherRewriteID == expectedB) ||
+		(req.ChosenRewriteID == expectedB && req.OtherRewriteID == expectedA)
+	if !validPair {
+		Error(w, http.StatusBadRequest, "Rewrite choices do not match the presented comparison")
 		return
 	}
 
@@ -175,7 +179,8 @@ func (h *Handler) sendVoteStats(w http.ResponseWriter, r *http.Request, articleI
 		var ri rewriteInfo
 		h.pool.QueryRow(r.Context(),
 			`SELECT ar.id, lm.display_name FROM article_rewrites ar
-			 JOIN llm_models lm ON lm.id = ar.llm_model_id WHERE ar.id = $1`, rewriteID,
+			 JOIN llm_models lm ON lm.id = ar.llm_model_id
+			 WHERE ar.id = $1 AND ar.article_id = $2 AND ar.processing_status = 'completed'`, rewriteID, articleID,
 		).Scan(&ri.ID, &ri.Name)
 		return ri
 	}
@@ -185,10 +190,10 @@ func (h *Handler) sendVoteStats(w http.ResponseWriter, r *http.Request, articleI
 
 	var votesA, votesB int
 	h.pool.QueryRow(r.Context(),
-		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", chosenID,
+		"SELECT COUNT(*) FROM rewrite_votes WHERE article_id = $1 AND chosen_rewrite_id = $2", articleID, chosenID,
 	).Scan(&votesA)
 	h.pool.QueryRow(r.Context(),
-		"SELECT COUNT(*) FROM rewrite_votes WHERE chosen_rewrite_id = $1", otherID,
+		"SELECT COUNT(*) FROM rewrite_votes WHERE article_id = $1 AND chosen_rewrite_id = $2", articleID, otherID,
 	).Scan(&votesB)
 
 	JSON(w, http.StatusOK, models.VoteStatsResponse{
@@ -200,6 +205,28 @@ func (h *Handler) sendVoteStats(w http.ResponseWriter, r *http.Request, articleI
 		VersionBName:  infoB.Name,
 		VersionBVotes: votesB,
 	})
+}
+
+func (h *Handler) loadCompletedRewrites(ctx context.Context, articleID uuid.UUID) ([]models.RewriteVersion, error) {
+	rows, err := h.pool.Query(ctx,
+		`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+		 FROM article_rewrites ar
+		 JOIN llm_models lm ON lm.id = ar.llm_model_id
+		 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
+		 ORDER BY ar.llm_model_id`, articleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rewrites := make([]models.RewriteVersion, 0)
+	for rows.Next() {
+		var rv models.RewriteVersion
+		if err := rows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
+			return nil, err
+		}
+		rewrites = append(rewrites, rv)
+	}
+	return rewrites, rows.Err()
 }
 
 // pickPair returns two distinct indices from [0, n) deterministically based on seed.

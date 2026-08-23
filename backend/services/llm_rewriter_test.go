@@ -75,3 +75,19 @@ func TestParseArticleRewriteResultStripsMarkdownFenceAndNormalizesCategories(t *
 		t.Fatalf("categories = %q, want %q", got, want)
 	}
 }
+
+func TestNewArticleRewritersFromEnvSupportsDistinctModelList(t *testing.T) {
+	t.Setenv("LLM_API_KEY", "test-key")
+	t.Setenv("LLM_MODEL", "")
+	t.Setenv("LLM_MODELS", "model-a, model-b, model-a")
+	rewriters, err := NewArticleRewritersFromEnv()
+	if err != nil {
+		t.Fatalf("NewArticleRewritersFromEnv returned error: %v", err)
+	}
+	if len(rewriters) != 2 {
+		t.Fatalf("rewriter count = %d, want 2", len(rewriters))
+	}
+	if rewriters[0].Model() != "model-a" || rewriters[1].Model() != "model-b" {
+		t.Fatalf("models = %q, %q", rewriters[0].Model(), rewriters[1].Model())
+	}
+}

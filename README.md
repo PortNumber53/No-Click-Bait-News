@@ -12,6 +12,8 @@ A news reader app that delivers factual, no-clickbait news with an infinite scro
 │   ├── services/         # Business logic (migrations, Stripe, TinyFish)
 │   └── main.go           # API entry point and subcommands
 │
+├── frontend/         # React SPA and Cloudflare Worker API proxy
+│
 ├── mobile/           # Flutter mobile app
 │   └── lib/
 │       ├── models/       # Data models
@@ -28,7 +30,7 @@ cd backend
 export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/noclickbait"
 export JWT_SECRET_KEY="dev-secret"
 export STRIPE_SECRET_KEY="sk_test_..."
-export STRIPE_WEBHOOK_SECRET="whsec_..."
+export STRIPE_WEBHOOK_SECRET_SNAPSHOT="whsec_..."
 export TINYFISH_API_KEY="tf_..." # optional for server startup
 go run . migrate
 go run .
@@ -61,9 +63,17 @@ TinyFish settings:
 | `LLM_API_KEY` | unset | API key for the OpenAI-compatible rewrite API |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
 | `LLM_MODEL` | unset | Chat completions model used for article rewrites |
+| `LLM_MODELS` | unset | Optional comma-separated model list; two or more models enable blind comparisons |
 | `LLM_TEMPERATURE` | `0.2` | Rewrite sampling temperature |
 | `LLM_MAX_TOKENS` | `3000` | Maximum rewrite output tokens |
 | `LLM_REWRITE_STALE_ON_START_LIMIT` | `100` | Number of outdated article rewrites to queue when the API starts |
+| `LLM_REWRITE_MAX_ATTEMPTS` | `3` | Durable rewrite attempts before marking an article failed |
+| `CHECKOUT_RETURN_ORIGIN` | `https://ncbnews.truvis.co` | Trusted Stripe checkout return origin |
+
+Rewrite work is persisted in PostgreSQL and survives API restarts. Configure at
+least two models through `LLM_MODELS` (or a comma-separated `LLM_MODEL`) to populate
+the comparison and voting views. `backend/scripts/process_news.py` is retained only
+for legacy/manual backfills; it is not part of the deployed request pipeline.
 
 For FreeLLMAPI, map the Hermes-style model config like this:
 
@@ -100,6 +110,10 @@ flutter run
 | POST | `/api/v1/auth/login` | Login |
 | GET | `/api/v1/articles/feed` | Paginated article feed |
 | GET | `/api/v1/articles/{id}` | Single article detail |
+| POST | `/api/v1/articles/fetch` | Fetch and rewrite a submitted URL |
+| GET | `/api/v1/articles/{id}/comparison` | Blind rewrite comparison |
+| POST | `/api/v1/articles/{id}/vote` | Vote on the presented rewrite pair |
 | GET | `/api/v1/subscriptions/tiers` | List subscription tiers |
 | POST | `/api/v1/subscriptions/checkout` | Create Stripe checkout |
-| POST | `/api/v1/subscriptions/webhook` | Stripe webhook handler |
+| POST | `/webhook/stripe/snapshot` | Stripe snapshot webhook handler |
+| POST | `/webhook/stripe/thin` | Optional Stripe thin webhook handler |

@@ -15,19 +15,37 @@ export function ArticleDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    api.getArticle(id)
-      .then(setArticle)
-      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load article'));
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let pollsRemaining = 30;
 
-    // Load comparison data (may not exist for all articles)
-    api.getComparison(id)
-      .then(setComparison)
+    const loadComparison = () => api.getComparison(id)
+      .then(data => { if (!cancelled) setComparison(data); })
       .catch((e) => {
-        // 404 is expected if article hasn't been processed yet
         if (!(e instanceof ApiError && e.status === 404)) {
           console.error('Failed to load comparison:', e);
         }
       });
+
+    const loadArticle = () => api.getArticle(id)
+      .then(data => {
+        if (cancelled) return;
+        setArticle(data);
+        if (data.rewrite_status === 'pending' && pollsRemaining-- > 0) {
+          pollTimer = setTimeout(loadArticle, 2000);
+        } else {
+          void loadComparison();
+        }
+      })
+      .catch(e => {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load article');
+      });
+
+    void loadArticle();
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
   }, [id]);
 
   if (error) {

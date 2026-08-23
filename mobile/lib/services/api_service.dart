@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://ncbnews14.dev.portnumber53.com/api/v1',
+    defaultValue: 'https://ncbnews.truvis.co/api/v1',
   );
   static const _storage = FlutterSecureStorage();
 

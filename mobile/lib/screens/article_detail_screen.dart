@@ -56,11 +56,10 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
   String _tabLabel(int index, ArticleVersion version) {
     if (version.isOriginal) return 'Original';
     const letters = ['A', 'B', 'C', 'D'];
-    final llmIndex = _article.versions
-        .take(index)
-        .where((v) => !v.isOriginal)
-        .length;
-    final letter = llmIndex < letters.length ? letters[llmIndex] : '${llmIndex + 1}';
+    final llmIndex =
+        _article.versions.take(index).where((v) => !v.isOriginal).length;
+    final letter =
+        llmIndex < letters.length ? letters[llmIndex] : '${llmIndex + 1}';
     return 'Version $letter';
   }
 
@@ -167,8 +166,7 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
               votedForId: _votedForId,
               isVoting: _isVoting,
               llmVersions: llmVersions,
-              isAuthenticated:
-                  context.read<AuthProvider>().isAuthenticated,
+              isAuthenticated: context.read<AuthProvider>().isAuthenticated,
               onVote: _vote,
             );
           },
@@ -221,8 +219,7 @@ class _VersionTabBar extends StatelessWidget {
                       : theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(20),
                   border: isSelected
-                      ? Border.all(
-                          color: theme.colorScheme.primary, width: 1.5)
+                      ? Border.all(color: theme.colorScheme.primary, width: 1.5)
                       : null,
                 ),
                 child: Row(
@@ -244,9 +241,8 @@ class _VersionTabBar extends StatelessWidget {
                         color: isSelected
                             ? theme.colorScheme.primary
                             : theme.colorScheme.onSurfaceVariant,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
                   ],
@@ -309,8 +305,8 @@ class _VersionBody extends StatelessWidget {
                     avatar: const Icon(Icons.star_rounded, size: 16),
                     label: const Text('Premium'),
                     backgroundColor: theme.colorScheme.tertiaryContainer,
-                    labelStyle: TextStyle(
-                        color: theme.colorScheme.onTertiaryContainer),
+                    labelStyle:
+                        TextStyle(color: theme.colorScheme.onTertiaryContainer),
                     visualDensity: VisualDensity.compact,
                   ),
               ],
@@ -402,150 +398,6 @@ class _VersionBody extends StatelessWidget {
       ),
     );
   }
-
-  Widget _buildContentSection(
-    ThemeData theme,
-    bool hasOriginal,
-    bool hasContent,
-  ) {
-    if (!hasOriginal) {
-      return _buildRewriteContent(theme, hasContent);
-    }
-
-    final aiSection = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionTitle('AI Rewrite'),
-        _buildRewriteContent(theme, hasContent),
-      ],
-    );
-    final originalSection = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionTitle('Original'),
-        MarkdownContent(
-          markdown: article.originalContent!,
-          baseStyle: theme.textTheme.bodyMedium?.copyWith(
-            height: 1.8,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth >= 720) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: aiSection),
-              const SizedBox(width: 20),
-              Expanded(child: originalSection),
-            ],
-          );
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            aiSection,
-            const SizedBox(height: 24),
-            originalSection,
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildRewriteContent(ThemeData theme, bool hasContent) {
-    if (article.rewriteStatus == 'pending') {
-      return _ProcessingPanel(theme: theme);
-    }
-    if (article.rewriteStatus == 'failed') {
-      return _FailedPanel(theme: theme);
-    }
-    if (!hasContent) {
-      return const SizedBox.shrink();
-    }
-
-    return MarkdownContent(
-      markdown: article.content!,
-      baseStyle: theme.textTheme.bodyMedium?.copyWith(height: 1.8),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String text;
-
-  const _SectionTitle(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(
-        text.toUpperCase(),
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-}
-
-class _ProcessingPanel extends StatelessWidget {
-  final ThemeData theme;
-
-  const _ProcessingPanel({required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Row(
-        children: [
-          SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          SizedBox(width: 12),
-          Expanded(child: Text('Processing AI rewrite...')),
-        ],
-      ),
-    );
-  }
-}
-
-class _FailedPanel extends StatelessWidget {
-  final ThemeData theme;
-
-  const _FailedPanel({required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.error),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        'AI rewrite failed. The original article is still available.',
-        style: TextStyle(color: theme.colorScheme.error),
-      ),
-    );
-  }
 }
 
 // ── Vote section ─────────────────────────────────────────────────────────────
@@ -606,10 +458,8 @@ class _VoteSection extends StatelessWidget {
 
     if (hasVoted) {
       // After voting, reveal the model names
-      final chosenVersion =
-          votedForId == aId ? a : b;
-      final otherVersion =
-          votedForId == aId ? b : a;
+      final chosenVersion = votedForId == aId ? a : b;
+      final otherVersion = votedForId == aId ? b : a;
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -646,17 +496,18 @@ class _VoteSection extends StatelessWidget {
     }
 
     // Pre-vote: show "Prefer this version?" button on the current LLM version
-    final isCurrentChosen = version.rewriteId == aId || version.rewriteId == bId;
-    if (!isCurrentChosen || version.rewriteId == null) return const SizedBox.shrink();
+    final isCurrentChosen =
+        version.rewriteId == aId || version.rewriteId == bId;
+    if (!isCurrentChosen || version.rewriteId == null) {
+      return const SizedBox.shrink();
+    }
 
     final otherId = version.rewriteId == aId ? bId! : aId!;
 
     return SizedBox(
       width: double.infinity,
       child: FilledButton.icon(
-        onPressed: isVoting
-            ? null
-            : () => onVote(version.rewriteId!, otherId),
+        onPressed: isVoting ? null : () => onVote(version.rewriteId!, otherId),
         icon: isVoting
             ? const SizedBox(
                 width: 16,

@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/checkout/session"
@@ -23,7 +26,10 @@ func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUser(r.Context())
 	if user != nil {
 		h.pool.QueryRow(r.Context(),
-			"SELECT tier_id FROM user_subscriptions WHERE user_id = $1 AND status = 'active'",
+			`SELECT COALESCE(
+				(SELECT tier_id FROM user_subscriptions WHERE user_id = $1 AND status IN ('active', 'trialing')),
+				(SELECT id FROM subscription_tiers WHERE name = 'free')
+			)`,
 			user.ID,
 		).Scan(&currentTierID)
 	}
@@ -57,8 +63,25 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req models.CheckoutRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		Error(w, http.StatusBadRequest, "Invalid request body")
+	if !DecodeJSON(w, r, &req) {
+		return
+	}
+
+	var hasPaidSubscription bool
+	if err := h.pool.QueryRow(r.Context(),
+		`SELECT EXISTS(
+			SELECT 1 FROM user_subscriptions us
+			JOIN subscription_tiers st ON st.id = us.tier_id
+			WHERE us.user_id = $1
+			  AND us.status IN ('active', 'trialing')
+			  AND st.price_monthly > 0
+		)`, user.ID,
+	).Scan(&hasPaidSubscription); err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to check current subscription")
+		return
+	}
+	if hasPaidSubscription {
+		Error(w, http.StatusConflict, "An active paid subscription already exists")
 		return
 	}
 
@@ -76,17 +99,7 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 
 	stripe.Key = h.stripeKey
 
-	// Build redirect URLs from the request origin
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		origin = r.Header.Get("Referer")
-		if origin != "" {
-			// Strip path from referer to get origin
-			if u, err := url.Parse(origin); err == nil {
-				origin = u.Scheme + "://" + u.Host
-			}
-		}
-	}
+	origin := strings.TrimRight(strings.TrimSpace(os.Getenv("CHECKOUT_RETURN_ORIGIN")), "/")
 	if origin == "" {
 		origin = "https://ncbnews.truvis.co"
 	}
@@ -94,8 +107,7 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 	cancelURL := origin + "/subscriptions?canceled=true"
 
 	params := &stripe.CheckoutSessionParams{
-		CustomerEmail: &user.Email,
-		Mode:          stripe.String(string(stripe.CheckoutSessionModeSubscription)),
+		Mode: stripe.String(string(stripe.CheckoutSessionModeSubscription)),
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{Price: tier.StripePriceID, Quantity: stripe.Int64(1)},
 		},
@@ -107,6 +119,11 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 				"tier_id": strconv.Itoa(tier.ID),
 			},
 		},
+	}
+	if user.StripeCustomerID != nil && strings.TrimSpace(*user.StripeCustomerID) != "" {
+		params.Customer = user.StripeCustomerID
+	} else {
+		params.CustomerEmail = &user.Email
 	}
 
 	sess, err := session.New(params)
@@ -147,23 +164,40 @@ func (h *Handler) StripeWebhookThin(w http.ResponseWriter, r *http.Request) {
 		var thinObj struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(event.Data.Raw, &thinObj); err == nil && thinObj.ID != "" {
-			sess, err := session.Get(thinObj.ID, &stripe.CheckoutSessionParams{})
-			if err == nil {
-				h.handleCheckoutCompleted(r, sess)
-			}
+		if err := json.Unmarshal(event.Data.Raw, &thinObj); err != nil || thinObj.ID == "" {
+			Error(w, http.StatusBadRequest, "Invalid webhook payload")
+			return
+		}
+		sess, err := session.Get(thinObj.ID, &stripe.CheckoutSessionParams{})
+		if err != nil {
+			log.Printf("[webhook/thin] checkout processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
+		}
+		if err := h.handleCheckoutCompleted(r.Context(), sess); err != nil {
+			log.Printf("[webhook/thin] checkout processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
 		}
 	case "customer.subscription.updated", "customer.subscription.deleted":
 		var thinObj struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(event.Data.Raw, &thinObj); err == nil && thinObj.ID != "" {
-			// Fetch the full subscription from Stripe
-			params := &stripe.SubscriptionParams{}
-			sub, err := subscriptionAPI.Get(thinObj.ID, params)
-			if err == nil {
-				h.handleSubscriptionUpdated(r, sub)
-			}
+		if err := json.Unmarshal(event.Data.Raw, &thinObj); err != nil || thinObj.ID == "" {
+			Error(w, http.StatusBadRequest, "Invalid webhook payload")
+			return
+		}
+		params := &stripe.SubscriptionParams{}
+		sub, err := subscriptionAPI.Get(thinObj.ID, params)
+		if err != nil {
+			log.Printf("[webhook/thin] subscription processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
+		}
+		if err := h.handleSubscriptionUpdated(r.Context(), sub); err != nil {
+			log.Printf("[webhook/thin] subscription processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
 		}
 	}
 
@@ -200,48 +234,95 @@ func (h *Handler) StripeWebhookSnapshot(w http.ResponseWriter, r *http.Request) 
 	switch event.Type {
 	case "checkout.session.completed":
 		var sess stripe.CheckoutSession
-		if err := json.Unmarshal(event.Data.Raw, &sess); err == nil {
-			h.handleCheckoutCompleted(r, &sess)
+		if err := json.Unmarshal(event.Data.Raw, &sess); err != nil {
+			Error(w, http.StatusBadRequest, "Invalid webhook payload")
+			return
+		}
+		if err := h.handleCheckoutCompleted(r.Context(), &sess); err != nil {
+			log.Printf("[webhook/snapshot] checkout processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
 		}
 	case "customer.subscription.updated", "customer.subscription.deleted":
 		var sub stripe.Subscription
-		if err := json.Unmarshal(event.Data.Raw, &sub); err == nil {
-			h.handleSubscriptionUpdated(r, &sub)
+		if err := json.Unmarshal(event.Data.Raw, &sub); err != nil {
+			Error(w, http.StatusBadRequest, "Invalid webhook payload")
+			return
+		}
+		if err := h.handleSubscriptionUpdated(r.Context(), &sub); err != nil {
+			log.Printf("[webhook/snapshot] subscription processing failed: %v", err)
+			Error(w, http.StatusInternalServerError, "Webhook processing failed")
+			return
 		}
 	}
 
 	JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *Handler) handleCheckoutCompleted(r *http.Request, sess *stripe.CheckoutSession) {
+func (h *Handler) handleCheckoutCompleted(ctx context.Context, sess *stripe.CheckoutSession) error {
 	userID := sess.Metadata["user_id"]
 	tierID := sess.Metadata["tier_id"]
 	if userID == "" || tierID == "" {
-		return
+		return fmt.Errorf("checkout metadata is incomplete")
 	}
 
-	tid, _ := strconv.Atoi(tierID)
+	tid, err := strconv.Atoi(tierID)
+	if err != nil {
+		return fmt.Errorf("invalid tier metadata: %w", err)
+	}
 	subID := ""
 	if sess.Subscription != nil {
 		subID = sess.Subscription.ID
 	}
 
 	// Upsert subscription
-	h.pool.Exec(r.Context(),
+	var customerID *string
+	if sess.Customer != nil && sess.Customer.ID != "" {
+		customerID = &sess.Customer.ID
+	}
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if customerID != nil {
+		if _, err := tx.Exec(ctx, "UPDATE users SET stripe_customer_id = $1, updated_at = NOW() WHERE id = $2", customerID, userID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO user_subscriptions (id, user_id, tier_id, stripe_subscription_id, status, created_at, updated_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, 'active', NOW(), NOW())
 		 ON CONFLICT (user_id) DO UPDATE SET tier_id = $2, stripe_subscription_id = $3, status = 'active', updated_at = NOW()`,
 		userID, tid, subID,
-	)
+	); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
-func (h *Handler) handleSubscriptionUpdated(r *http.Request, sub *stripe.Subscription) {
+func (h *Handler) handleSubscriptionUpdated(ctx context.Context, sub *stripe.Subscription) error {
 	if sub.ID == "" {
-		return
+		return fmt.Errorf("subscription ID is missing")
 	}
 	status := string(sub.Status)
-	h.pool.Exec(r.Context(),
-		"UPDATE user_subscriptions SET status = $1, updated_at = NOW() WHERE stripe_subscription_id = $2",
+	if status == "active" || status == "trialing" {
+		tag, err := h.pool.Exec(ctx,
+			"UPDATE user_subscriptions SET status = $1, updated_at = NOW() WHERE stripe_subscription_id = $2",
+			status, sub.ID,
+		)
+		if err == nil && tag.RowsAffected() == 0 {
+			return fmt.Errorf("subscription %s is not linked to a user", sub.ID)
+		}
+		return err
+	}
+	_, err := h.pool.Exec(ctx,
+		`UPDATE user_subscriptions
+		 SET tier_id = (SELECT id FROM subscription_tiers WHERE name = 'free'),
+		     status = $1,
+		     updated_at = NOW()
+		 WHERE stripe_subscription_id = $2`,
 		status, sub.ID,
 	)
+	return err
 }

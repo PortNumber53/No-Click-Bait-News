@@ -1,25 +1,22 @@
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api, ApiError } from '../services/api';
 import type { User } from '../types';
+import { AuthContext } from './auth-context';
 
-interface AuthState {
-  user: User | null;
-  isLoading: boolean;
-  error: string | null;
-  isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string) => Promise<void>;
-  logout: () => void;
-  clearError: () => void;
+function loadStoredUser(): User | null {
+  const stored = localStorage.getItem('user');
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored) as User;
+  } catch {
+    localStorage.removeItem('user');
+    localStorage.removeItem('access_token');
+    return null;
+  }
 }
 
-const AuthContext = createContext<AuthState | null>(null);
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem('user');
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [user, setUser] = useState<User | null>(loadStoredUser);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +29,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('user');
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!localStorage.getItem('access_token')) return;
+    api.getMe().then(setUser).catch(() => {
+      localStorage.removeItem('access_token');
+      setUser(null);
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleUnauthorized = () => setUser(null);
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setIsLoading(true);
@@ -74,10 +85,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }
