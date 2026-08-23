@@ -20,6 +20,7 @@ const (
 	defaultLLMBaseURL          = "https://api.openai.com/v1"
 	defaultLLMTemperature      = 0.2
 	defaultLLMMaxTokens        = 3000
+	defaultLLMHTTPTimeout      = 5 * time.Minute
 	ArticleRewriteAgentVersion = 2
 )
 
@@ -139,7 +140,7 @@ func NewArticleRewriter(apiKey, baseURL, model string, temperature float64, maxT
 		maxTokens = defaultLLMMaxTokens
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 90 * time.Second}
+		httpClient = &http.Client{Timeout: defaultLLMHTTPTimeout}
 	}
 	return &ArticleRewriter{
 		apiKey:      strings.TrimSpace(apiKey),

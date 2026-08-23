@@ -66,6 +66,7 @@ TinyFish settings:
 | `LLM_MODELS` | unset | Optional comma-separated model list; two or more models enable blind comparisons |
 | `LLM_TEMPERATURE` | `0.2` | Rewrite sampling temperature |
 | `LLM_MAX_TOKENS` | `3000` | Maximum rewrite output tokens |
+| `LLM_REWRITE_TIMEOUT_SECONDS` | `300` | Overall time budget for each article rewrite job |
 | `LLM_REWRITE_STALE_ON_START_LIMIT` | `100` | Number of outdated article rewrites to queue when the API starts |
 | `LLM_REWRITE_MAX_ATTEMPTS` | `3` | Durable rewrite attempts before marking an article failed |
 | `CHECKOUT_RETURN_ORIGIN` | `https://ncbnews.truvis.co` | Trusted Stripe checkout return origin |

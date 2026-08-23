@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
@@ -89,5 +90,8 @@ func TestNewArticleRewritersFromEnvSupportsDistinctModelList(t *testing.T) {
 	}
 	if rewriters[0].Model() != "model-a" || rewriters[1].Model() != "model-b" {
 		t.Fatalf("models = %q, %q", rewriters[0].Model(), rewriters[1].Model())
+	}
+	if rewriters[0].httpClient.Timeout != 5*time.Minute {
+		t.Fatalf("HTTP timeout = %s, want 5m", rewriters[0].httpClient.Timeout)
 	}
 }
