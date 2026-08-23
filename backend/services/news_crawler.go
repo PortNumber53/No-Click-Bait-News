@@ -83,6 +83,7 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 	rewriteJobs := make(chan crawlerRewriteJob, crawlerIntEnv("NEWS_CRAWLER_REWRITE_QUEUE_SIZE", 250))
 	seen := &sync.Map{}
 	var inserted atomic.Int64
+	var claimedSlots atomic.Int64
 	var feedWG sync.WaitGroup
 	var contentWG sync.WaitGroup
 	var rewriteWG sync.WaitGroup
@@ -92,15 +93,23 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 		go func(workerID int) {
 			defer contentWG.Done()
 			for job := range contentJobs {
-				if inserted.Load() >= int64(limit) {
+				if !claimCrawlerSlot(&claimedSlots, int64(limit)) {
 					continue
 				}
 				articleID, title, originalContent, insertedRow := crawlFetchContent(ctx, pool, tinyFish, job.Article, stats)
 				if !insertedRow {
+					claimedSlots.Add(-1)
 					continue
 				}
 				inserted.Add(1)
 				if rewriter == nil {
+					if _, err := pool.Exec(ctx,
+						"UPDATE articles SET rewrite_status = 'complete' WHERE id = $1",
+						articleID,
+					); err != nil {
+						stats.failed.Add(1)
+						log.Printf("[news.crawler.fetch] article_id=%s status=finalize_failed error=%q", articleID, err)
+					}
 					continue
 				}
 				select {
@@ -173,6 +182,18 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 	rewriteWG.Wait()
 
 	return stats.snapshot(), nil
+}
+
+func claimCrawlerSlot(claimed *atomic.Int64, limit int64) bool {
+	for {
+		current := claimed.Load()
+		if current >= limit {
+			return false
+		}
+		if claimed.CompareAndSwap(current, current+1) {
+			return true
+		}
+	}
 }
 
 type crawlerStats struct {
