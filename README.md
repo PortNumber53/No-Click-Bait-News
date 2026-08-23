@@ -78,10 +78,13 @@ for legacy/manual backfills; it is not part of the deployed request pipeline.
 For FreeLLMAPI, map the Hermes-style model config like this:
 
 ```bash
-LLM_BASE_URL=http://192.168.68.180:30001/v1
+LLM_BASE_URL=https://freellmapi.example.com/v1
 LLM_API_KEY=freellmapi-your-key
-LLM_MODEL=auto
+LLM_MODELS=auto,gpt-oss-120b
 ```
+
+Expose the API over HTTPS, restrict ingress to the backend host, and keep its raw
+service port private.
 
 ## Mobile Setup
 

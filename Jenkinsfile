@@ -37,8 +37,11 @@ pipeline {
     LLM_API_KEY  = credentials('prod-llm-api-key')
     LLM_BASE_URL = credentials('prod-llm-base-url')
     LLM_MODEL    = credentials('prod-llm-model')
-    LLM_REWRITE_WORKERS = '2'
+    LLM_MODELS = 'auto,gpt-oss-120b'
+    LLM_REWRITE_WORKERS = '1'
     LLM_REWRITE_TIMEOUT_SECONDS = '300'
+    LLM_REWRITE_STALE_ON_START_LIMIT = '100'
+    LLM_REWRITE_MAX_ATTEMPTS = '5'
 
     // CORS
     ALLOWED_ORIGINS        = credentials('prod-allowed-origins-ncbnews')
@@ -177,7 +180,7 @@ bash deploy/generate-ncbnews-backend-service.sh "$TARGET_DIR" api-ncbnews-backen
 scp api-ncbnews-backend.service "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.service"
 
 # Generate a dotenv file without interpolating credentials into this Jenkins script.
-node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
+node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_MODELS","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","LLM_REWRITE_STALE_ON_START_LIMIT","LLM_REWRITE_MAX_ATTEMPTS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
 scp /tmp/api-ncbnews-backend.env "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.env"
 rm -f /tmp/api-ncbnews-backend.env
 
