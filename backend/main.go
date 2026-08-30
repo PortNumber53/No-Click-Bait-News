@@ -23,9 +23,14 @@ import (
 	"github.com/PortNumber53/no-click-bait-news/backend/handlers"
 	"github.com/PortNumber53/no-click-bait-news/backend/middleware"
 	"github.com/PortNumber53/no-click-bait-news/backend/services"
+
+	"bufio"
+	"path/filepath"
 )
 
+
 func main() {
+	loadConfigINI()
 	_ = godotenv.Load()
 
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
@@ -268,4 +273,38 @@ func mustEnv(key string) string {
 		log.Fatalf("Required environment variable %s not set", key)
 	}
 	return v
+}
+
+func loadConfigINI() {
+	paths := []string{"/etc/No-Click-Bait-News/config.ini"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, ".config", "No-Click-Bait-News", "config.ini"))
+	}
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+				continue
+			}
+			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+				continue
+			}
+			key, val, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			key = strings.TrimSpace(key)
+			val = strings.TrimSpace(val)
+			val = strings.Trim(val, "'")
+			if key != "" && os.Getenv(key) == "" {
+				os.Setenv(key, val)
+			}
+		}
+		f.Close()
+	}
 }
