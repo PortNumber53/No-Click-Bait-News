@@ -77,6 +77,30 @@ func TestParseArticleRewriteResultStripsMarkdownFenceAndNormalizesCategories(t *
 	}
 }
 
+func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
+	rewrite, err := parseArticleRewriteResult(`{
+		"title":"<strong>Direct title</strong>",
+		"summary":"<p>Short &amp; factual.</p>",
+		"content":"<h2>Update</h2><p>Readable <em>article</em> text.</p><script>ignore()</script>",
+		"categories":["World"]
+	}`)
+	if err != nil {
+		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
+	}
+	if rewrite.Title != "Direct title" {
+		t.Fatalf("title = %q, want Direct title", rewrite.Title)
+	}
+	if rewrite.Summary != "Short & factual." {
+		t.Fatalf("summary = %q, want decoded plain text", rewrite.Summary)
+	}
+	if strings.Contains(rewrite.Content, "<") || strings.Contains(rewrite.Content, "ignore()") {
+		t.Fatalf("content retained HTML or script text: %q", rewrite.Content)
+	}
+	if !strings.Contains(rewrite.Content, "Readable article text.") {
+		t.Fatalf("content lost readable text: %q", rewrite.Content)
+	}
+}
+
 func TestNewArticleRewritersFromEnvSupportsDistinctModelList(t *testing.T) {
 	t.Setenv("LLM_API_KEY", "test-key")
 	t.Setenv("LLM_MODEL", "")

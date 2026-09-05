@@ -185,6 +185,7 @@ Rules:
 - Remove rambling, filler, teasers, promotional language, and "great reveal" structure.
 - Remove text unrelated to the news subject, including navigation copy, ad/link copy, newsletter prompts, social sharing text, recommendations, and boilerplate that is not part of the article.
 - Preserve useful headings, bullet lists, and links when they help comprehension.
+- Use Markdown only. Do not return HTML tags.
 - Do not add facts, claims, opinions, analysis, or context that is not in the original.
 - Assign 1 to 3 categories that best fit the article.
 - Categories must come from this exact list: %s.
@@ -272,9 +273,9 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 		return ArticleRewriteResult{}, fmt.Errorf("decode LLM rewrite content JSON: %w", err)
 	}
 
-	result.Content = strings.TrimSpace(result.Content)
-	result.Title = strings.TrimSpace(result.Title)
-	result.Summary = strings.TrimSpace(result.Summary)
+	result.Content = stripHTMLMarkup(result.Content)
+	result.Title = strings.Join(strings.Fields(stripHTMLMarkup(result.Title)), " ")
+	result.Summary = strings.Join(strings.Fields(stripHTMLMarkup(result.Summary)), " ")
 	if result.Content == "" {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite content was empty")
 	}

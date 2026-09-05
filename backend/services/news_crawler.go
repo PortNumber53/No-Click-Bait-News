@@ -366,7 +366,7 @@ func sourceNameFromURL(raw string) string {
 }
 
 func summarizeText(value string, limit int) string {
-	return truncateText(strings.Join(strings.Fields(value), " "), limit)
+	return truncateText(strings.Join(strings.Fields(stripHTMLMarkup(value)), " "), limit)
 }
 
 func truncateText(value string, limit int) string {
