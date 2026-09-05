@@ -53,10 +53,14 @@ TINYFISH_API_KEY="tf_..." go run . fetch-content 100
 
 ### Hourly News Crawl
 
-The deployed crawler checks BBC, Al Jazeera, NPR, The Guardian, and NBC News at minute
-17 of every hour. It deduplicates articles by source URL, fetches new content with
-TinyFish, and places rewrites on the API's durable retry queue. The default run
-limit is 25 new articles and can be changed with `NEWS_CRAWLER_LIMIT`.
+The deployed crawler checks 17 public feeds at minute 17 of every hour: ABC News,
+CBS News, CBC News, PBS NewsHour, France 24, ProPublica, BBC, Al Jazeera, NPR, The
+Guardian, NBC News, The New York Times, Politico, Sky News, Financial Times, Ars
+Technica, and TechCrunch. Feed entries are interleaved round-robin so fast sources
+cannot monopolize a run. The crawler deduplicates articles by source URL, fetches
+new content with TinyFish, and places rewrites on the API's durable retry queue.
+The default run limit is 25 new articles and can be changed with
+`NEWS_CRAWLER_LIMIT`.
 
 The deployment installs `/etc/cron.d/ncbnews-news-crawler`. Runs are protected by
 an exclusive lock and logged to `logs/news-crawler.log` under the backend directory.

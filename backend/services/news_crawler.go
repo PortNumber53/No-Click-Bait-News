@@ -20,12 +20,29 @@ import (
 )
 
 var defaultNewsCrawlerFeeds = []string{
+	// Recommended general-interest and public-interest additions.
+	"https://abcnews.com/abcnews/topstories",
+	"https://www.cbsnews.com/latest/rss/main",
+	"https://www.cbc.ca/cmlink/rss-topstories",
+	"https://www.pbs.org/newshour/feeds/rss/headlines",
+	"https://www.france24.com/en/rss",
+	"https://www.propublica.org/feeds/propublica/main",
+	// Existing sources.
 	"https://feeds.bbci.co.uk/news/rss.xml",
 	"https://www.aljazeera.com/xml/rss/all.xml",
 	"https://www.npr.org/rss/rss.php?id=1001",
 	"https://www.theguardian.com/world/rss",
 	"https://feeds.nbcnews.com/nbcnews/public/news",
+	// Additional national, international, business, politics, and technology feeds.
+	"https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+	"https://rss.politico.com/politics-news.xml",
+	"https://feeds.skynews.com/feeds/rss/home.xml",
+	"https://www.ft.com/rss/home",
+	"https://feeds.arstechnica.com/arstechnica/index",
+	"https://techcrunch.com/feed/",
 }
+
+var newsCrawlerHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type NewsCrawlerStats struct {
 	FeedsChecked  int
@@ -45,6 +62,17 @@ type feedArticle struct {
 
 type contentFetchJob struct {
 	Article feedArticle
+}
+
+type feedFetchJob struct {
+	Index int
+	URL   string
+}
+
+type feedFetchResult struct {
+	Index    int
+	Articles []feedArticle
+	Err      error
 }
 
 type rssFeed struct {
@@ -70,10 +98,9 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 	stats := &crawlerStats{}
 	stats.feedsChecked.Store(int64(len(feeds)))
 
-	feedJobs := make(chan string, crawlerIntEnv("NEWS_CRAWLER_RSS_QUEUE_SIZE", 100))
+	feedJobs := make(chan feedFetchJob, crawlerIntEnv("NEWS_CRAWLER_RSS_QUEUE_SIZE", 100))
+	feedResults := make(chan feedFetchResult, len(feeds))
 	contentJobs := make(chan contentFetchJob, crawlerIntEnv("NEWS_CRAWLER_URL_QUEUE_SIZE", 250))
-	seen := &sync.Map{}
-	var inserted atomic.Int64
 	var claimedSlots atomic.Int64
 	var feedWG sync.WaitGroup
 	var contentWG sync.WaitGroup
@@ -91,7 +118,6 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 					claimedSlots.Add(-1)
 					continue
 				}
-				inserted.Add(1)
 				if rewriter == nil {
 					if _, err := pool.Exec(ctx,
 						"UPDATE articles SET rewrite_status = 'complete' WHERE id = $1",
@@ -118,49 +144,89 @@ func CrawlMajorNews(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFishC
 		feedWG.Add(1)
 		go func(workerID int) {
 			defer feedWG.Done()
-			for feedURL := range feedJobs {
-				articles, err := fetchFeedArticles(ctx, feedURL)
+			for job := range feedJobs {
+				articles, err := fetchFeedArticles(ctx, job.URL)
 				if err != nil {
 					stats.failed.Add(1)
-					log.Printf("[news.crawler.feed] worker=%d feed=%q status=failed error=%q", workerID, feedURL, err)
-					continue
+					log.Printf("[news.crawler.feed] worker=%d feed=%q status=failed error=%q", workerID, job.URL, err)
+				} else {
+					log.Printf("[news.crawler.feed] worker=%d feed=%q status=parsed urls=%d", workerID, job.URL, len(articles))
 				}
-				log.Printf("[news.crawler.feed] worker=%d feed=%q status=parsed urls=%d", workerID, feedURL, len(articles))
-				for _, article := range articles {
-					if inserted.Load() >= int64(limit) {
-						return
-					}
-					if article.URL == "" {
-						continue
-					}
-					if _, loaded := seen.LoadOrStore(article.URL, true); loaded {
-						continue
-					}
-					stats.urlsFound.Add(1)
-					select {
-					case contentJobs <- contentFetchJob{Article: article}:
-					case <-ctx.Done():
-						return
-					}
+				select {
+				case feedResults <- feedFetchResult{Index: job.Index, Articles: articles, Err: err}:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}(i)
 	}
 
-	for _, feedURL := range feeds {
+feedEnqueue:
+	for index, feedURL := range feeds {
 		select {
-		case feedJobs <- feedURL:
+		case feedJobs <- feedFetchJob{Index: index, URL: feedURL}:
 		case <-ctx.Done():
-			break
+			break feedEnqueue
 		}
 	}
 	close(feedJobs)
 
 	feedWG.Wait()
+	close(feedResults)
+	articlesByFeed := make([][]feedArticle, len(feeds))
+	for result := range feedResults {
+		if result.Err == nil {
+			articlesByFeed[result.Index] = result.Articles
+		}
+	}
+
+	seen := make(map[string]struct{})
+	for _, article := range interleaveFeedArticles(articlesByFeed) {
+		if stats.inserted.Load() >= int64(limit) {
+			break
+		}
+		if article.URL == "" {
+			continue
+		}
+		if _, exists := seen[article.URL]; exists {
+			continue
+		}
+		seen[article.URL] = struct{}{}
+		stats.urlsFound.Add(1)
+		select {
+		case contentJobs <- contentFetchJob{Article: article}:
+		case <-ctx.Done():
+			close(contentJobs)
+			contentWG.Wait()
+			return stats.snapshot(), ctx.Err()
+		}
+	}
 	close(contentJobs)
 	contentWG.Wait()
 
 	return stats.snapshot(), nil
+}
+
+func interleaveFeedArticles(feeds [][]feedArticle) []feedArticle {
+	total := 0
+	for _, articles := range feeds {
+		total += len(articles)
+	}
+
+	interleaved := make([]feedArticle, 0, total)
+	for position := 0; len(interleaved) < total; position++ {
+		added := false
+		for _, articles := range feeds {
+			if position < len(articles) {
+				interleaved = append(interleaved, articles[position])
+				added = true
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return interleaved
 }
 
 func claimCrawlerSlot(claimed *atomic.Int64, limit int64) bool {
@@ -282,7 +348,7 @@ func fetchFeedArticles(ctx context.Context, feedURL string) ([]feedArticle, erro
 	}
 	req.Header.Set("User-Agent", "No-Click-Bait-News/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newsCrawlerHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
