@@ -51,6 +51,17 @@ cd backend
 TINYFISH_API_KEY="tf_..." go run . fetch-content 100
 ```
 
+### Hourly News Crawl
+
+The deployed crawler checks BBC, Al Jazeera, NPR, The Guardian, and NBC News at minute
+17 of every hour. It deduplicates articles by source URL, fetches new content with
+TinyFish, and places rewrites on the API's durable retry queue. The default run
+limit is 25 new articles and can be changed with `NEWS_CRAWLER_LIMIT`.
+
+The deployment installs `/etc/cron.d/ncbnews-news-crawler`. Runs are protected by
+an exclusive lock and logged to `logs/news-crawler.log` under the backend directory.
+For a manual limited run, execute `run-news-crawler.sh 1` from that directory.
+
 TinyFish settings:
 
 | Env var | Default | Description |
@@ -60,6 +71,7 @@ TinyFish settings:
 | `TINYFISH_FETCH_FORMAT` | `markdown` | `markdown`, `html`, or `json` |
 | `TINYFISH_FETCH_TTL` | `3600` | Cache freshness tolerance in seconds; use `0` for live fetches |
 | `TINYFISH_FETCH_TIMEOUT_MS` | `45000` | Per-URL timeout sent to TinyFish |
+| `NEWS_CRAWLER_LIMIT` | `25` | Maximum number of new articles inserted by each crawl |
 | `LLM_API_KEY` | unset | API key for the OpenAI-compatible rewrite API |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
 | `LLM_MODEL` | unset | Chat completions model used for article rewrites |

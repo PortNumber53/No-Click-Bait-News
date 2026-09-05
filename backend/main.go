@@ -133,7 +133,7 @@ func runCrawlNews() {
 	if err != nil {
 		log.Fatalf("News crawl failed: %v", err)
 	}
-	log.Printf("News crawl complete: feeds=%d urls=%d inserted=%d skipped=%d rewritten=%d failed=%d elapsed=%s", stats.FeedsChecked, stats.URLsFound, stats.Inserted, stats.Skipped, stats.Rewritten, stats.Failed, time.Since(start))
+	log.Printf("News crawl complete: feeds=%d urls=%d inserted=%d skipped=%d rewrite_queued=%d failed=%d elapsed=%s", stats.FeedsChecked, stats.URLsFound, stats.Inserted, stats.Skipped, stats.RewriteQueued, stats.Failed, time.Since(start))
 }
 
 func runServer() {

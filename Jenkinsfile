@@ -32,6 +32,7 @@ pipeline {
 
     // TinyFish content fetching
     TINYFISH_API_KEY = credentials('prod-tinyfish-api-key')
+    NEWS_CRAWLER_LIMIT = '25'
 
     // OpenAI-compatible article rewriting
     LLM_API_KEY  = credentials('prod-llm-api-key')
@@ -176,11 +177,16 @@ scp "$BIN_LOCAL" "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend"
 # Generate systemd unit file
 bash deploy/generate-ncbnews-backend-service.sh "$TARGET_DIR" api-ncbnews-backend.service
 
-# Upload unit file
+# Generate the hourly news crawler cron definition.
+bash deploy/generate-news-crawler-cron.sh "$TARGET_DIR" ncbnews-news-crawler.cron
+
+# Upload service, crawler, and cron files.
 scp api-ncbnews-backend.service "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.service"
+scp deploy/run-news-crawler.sh "grimlock@$TARGET_HOST:/tmp/run-news-crawler.sh"
+scp ncbnews-news-crawler.cron "grimlock@$TARGET_HOST:/tmp/ncbnews-news-crawler.cron"
 
 # Generate a dotenv file without interpolating credentials into this Jenkins script.
-node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_MODELS","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","LLM_REWRITE_STALE_ON_START_LIMIT","LLM_REWRITE_MAX_ATTEMPTS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
+node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","NEWS_CRAWLER_LIMIT","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_MODELS","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","LLM_REWRITE_STALE_ON_START_LIMIT","LLM_REWRITE_MAX_ATTEMPTS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
 scp /tmp/api-ncbnews-backend.env "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.env"
 rm -f /tmp/api-ncbnews-backend.env
 
@@ -199,8 +205,15 @@ ssh "grimlock@$TARGET_HOST" "
   sudo chmod 0755 $TARGET_DIR/api-ncbnews-backend
   sudo chmod 0600 $TARGET_DIR/.env
   sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/$SERVICE_NAME.service
+  sudo mv /tmp/run-news-crawler.sh $TARGET_DIR/run-news-crawler.sh
+  sudo chown grimlock:grimlock $TARGET_DIR/run-news-crawler.sh
+  sudo chmod 0755 $TARGET_DIR/run-news-crawler.sh
+  sudo mv /tmp/ncbnews-news-crawler.cron /etc/cron.d/ncbnews-news-crawler
+  sudo chown root:root /etc/cron.d/ncbnews-news-crawler
+  sudo chmod 0644 /etc/cron.d/ncbnews-news-crawler
   sudo systemctl daemon-reload
   sudo systemctl enable $SERVICE_NAME
+  sudo systemctl enable --now cronie
   sudo systemctl start $SERVICE_NAME
   healthy=false
   for attempt in 1 2 3 4 5 6; do
