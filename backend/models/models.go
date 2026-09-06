@@ -107,6 +107,7 @@ type ArticleResponse struct {
 	IsPremium         bool             `json:"is_premium"`
 	ViewCount         int              `json:"view_count"`
 	Rewrites          []RewriteVersion `json:"rewrites,omitempty"`
+	AccessExpiresAt   *time.Time       `json:"access_expires_at,omitempty"`
 }
 
 type FeedResponse struct {

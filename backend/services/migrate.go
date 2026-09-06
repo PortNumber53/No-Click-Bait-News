@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,8 +35,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("schema migration: %w", err)
 		}
 	}
+	if err := migrateLegacyReadTracking(ctx, tx); err != nil {
+		return fmt.Errorf("migrate read tracking: %w", err)
+	}
 	if _, err := tx.Exec(ctx,
-		"INSERT INTO schema_migrations (version) VALUES ('go-schema-2026-08-22') ON CONFLICT DO NOTHING",
+		"INSERT INTO schema_migrations (version) VALUES ('go-schema-2026-09-05-read-grants') ON CONFLICT DO NOTHING",
 	); err != nil {
 		return fmt.Errorf("record schema migration: %w", err)
 	}
@@ -133,15 +137,6 @@ var schemaDDL = []string{
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
 
-	`CREATE TABLE IF NOT EXISTS user_article_reads (
-		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-		article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-		read_date DATE NOT NULL DEFAULT CURRENT_DATE,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		PRIMARY KEY (user_id, article_id, read_date)
-	)`,
-	`CREATE INDEX IF NOT EXISTS ix_user_article_reads_user_date
-		ON user_article_reads (user_id, read_date)`,
 	`CREATE TABLE IF NOT EXISTS user_category_daily_reads (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		read_category VARCHAR NOT NULL,
@@ -152,15 +147,22 @@ var schemaDDL = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS ix_user_category_daily_reads_article
 		ON user_category_daily_reads (user_id, article_id, read_date)`,
-	`CREATE TABLE IF NOT EXISTS user_monthly_article_reads (
+	`CREATE TABLE IF NOT EXISTS user_article_access_grants (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-		period_start DATE NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-		PRIMARY KEY (user_id, article_id, period_start)
+		granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		expires_at TIMESTAMPTZ NOT NULL,
+		PRIMARY KEY (user_id, article_id)
 	)`,
-	`CREATE INDEX IF NOT EXISTS ix_user_monthly_article_reads_usage
-		ON user_monthly_article_reads (user_id, period_start)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_article_access_grants_expiry
+		ON user_article_access_grants (expires_at)`,
+	`CREATE TABLE IF NOT EXISTS user_monthly_read_usage (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		period_start DATE NOT NULL,
+		reads_used INTEGER NOT NULL DEFAULT 0 CHECK (reads_used >= 0),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, period_start)
+	)`,
 	`CREATE TABLE IF NOT EXISTS user_url_fetches (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		source_url TEXT NOT NULL,
@@ -231,6 +233,76 @@ var schemaDDL = []string{
 	)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS ix_rewrite_votes_user_article
 		ON rewrite_votes (article_id, user_id) WHERE user_id IS NOT NULL`,
+}
+
+func migrateLegacyReadTracking(ctx context.Context, tx pgx.Tx) error {
+	// Free-plan selections are already bounded by day. Convert recent selections
+	// into reusable seven-day grants before the cleanup worker prunes old rows.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_article_access_grants (user_id, article_id, granted_at, expires_at)
+		SELECT user_id, article_id, created_at, created_at + INTERVAL '7 days'
+		FROM user_category_daily_reads
+		WHERE created_at > NOW() - INTERVAL '7 days'
+		ON CONFLICT (user_id, article_id) DO UPDATE SET
+		  granted_at = LEAST(user_article_access_grants.granted_at, EXCLUDED.granted_at),
+		  expires_at = GREATEST(user_article_access_grants.expires_at, EXCLUDED.expires_at)`); err != nil {
+		return err
+	}
+
+	var monthlyTableExists bool
+	if err := tx.QueryRow(ctx,
+		"SELECT to_regclass('public.user_monthly_article_reads') IS NOT NULL",
+	).Scan(&monthlyTableExists); err != nil {
+		return err
+	}
+	if monthlyTableExists {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_monthly_read_usage (user_id, period_start, reads_used)
+			SELECT user_id, period_start, COUNT(*)::integer
+			FROM user_monthly_article_reads
+			GROUP BY user_id, period_start
+			ON CONFLICT (user_id, period_start) DO UPDATE SET
+			  reads_used = GREATEST(user_monthly_read_usage.reads_used, EXCLUDED.reads_used),
+			  updated_at = NOW()`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_article_access_grants (user_id, article_id, granted_at, expires_at)
+			SELECT user_id, article_id, created_at, created_at + INTERVAL '7 days'
+			FROM user_monthly_article_reads
+			WHERE created_at > NOW() - INTERVAL '7 days'
+			ON CONFLICT (user_id, article_id) DO UPDATE SET
+			  granted_at = LEAST(user_article_access_grants.granted_at, EXCLUDED.granted_at),
+			  expires_at = GREATEST(user_article_access_grants.expires_at, EXCLUDED.expires_at)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DROP TABLE user_monthly_article_reads"); err != nil {
+			return err
+		}
+	}
+
+	var legacyDailyTableExists bool
+	if err := tx.QueryRow(ctx,
+		"SELECT to_regclass('public.user_article_reads') IS NOT NULL",
+	).Scan(&legacyDailyTableExists); err != nil {
+		return err
+	}
+	if legacyDailyTableExists {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO user_article_access_grants (user_id, article_id, granted_at, expires_at)
+			SELECT user_id, article_id, created_at, created_at + INTERVAL '7 days'
+			FROM user_article_reads
+			WHERE created_at > NOW() - INTERVAL '7 days'
+			ON CONFLICT (user_id, article_id) DO UPDATE SET
+			  granted_at = LEAST(user_article_access_grants.granted_at, EXCLUDED.granted_at),
+			  expires_at = GREATEST(user_article_access_grants.expires_at, EXCLUDED.expires_at)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "DROP TABLE user_article_reads"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {

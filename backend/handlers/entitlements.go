@@ -5,18 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 const freeURLFetchesPerDay = 10
+const articleAccessRetentionDays = 7
 
 type readingEntitlement struct {
 	TierName         string
 	MonthlyReadLimit int
 	HasPremiumAccess bool
 	UnlimitedReading bool
+}
+
+type articleReadAccess struct {
+	Allowed   bool
+	ExpiresAt *time.Time
 }
 
 func (h *Handler) getReadingEntitlement(ctx context.Context, userID uuid.UUID) (readingEntitlement, error) {
@@ -40,94 +47,95 @@ func (h *Handler) hasUnlimitedReading(ctx context.Context, userID uuid.UUID) (bo
 	return access.UnlimitedReading, err
 }
 
-func (h *Handler) recordArticleRead(ctx context.Context, userID, articleID uuid.UUID, category string, access readingEntitlement) (bool, error) {
+func (h *Handler) recordArticleRead(ctx context.Context, userID, articleID uuid.UUID, category string, access readingEntitlement) (articleReadAccess, error) {
 	if access.UnlimitedReading {
-		return true, nil
-	}
-	if access.MonthlyReadLimit > 0 {
-		return h.recordMonthlyArticleRead(ctx, userID, articleID, access.MonthlyReadLimit)
+		return articleReadAccess{Allowed: true}, nil
 	}
 
 	category = canonicalReadCategory(category)
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
-		return false, err
+		return articleReadAccess{}, err
 	}
 	defer tx.Rollback(ctx)
 
-	lockKey := userID.String() + ":" + category
+	lockKey := userID.String() + ":article-access"
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
-		return false, err
+		return articleReadAccess{}, err
 	}
 
-	var chosenArticleID uuid.UUID
+	var existingExpiry time.Time
 	err = tx.QueryRow(ctx,
-		`SELECT article_id FROM user_category_daily_reads
-		 WHERE user_id = $1 AND read_category = $2 AND read_date = CURRENT_DATE`,
-		userID, category,
-	).Scan(&chosenArticleID)
+		`SELECT expires_at FROM user_article_access_grants
+		 WHERE user_id = $1 AND article_id = $2 AND expires_at > NOW()`,
+		userID, articleID,
+	).Scan(&existingExpiry)
 	if err == nil {
-		return chosenArticleID == articleID, tx.Commit(ctx)
+		return articleReadAccess{Allowed: true, ExpiresAt: &existingExpiry}, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return false, err
+		return articleReadAccess{}, err
 	}
 
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_category_daily_reads (user_id, read_category, article_id)
-		 VALUES ($1, $2, $3)`,
-		userID, category, articleID,
-	); err != nil {
-		return false, err
+	if access.MonthlyReadLimit > 0 {
+		var used int
+		err = tx.QueryRow(ctx,
+			`INSERT INTO user_monthly_read_usage (user_id, period_start, reads_used)
+			 VALUES ($1, date_trunc('month', CURRENT_DATE)::date, 1)
+			 ON CONFLICT (user_id, period_start) DO UPDATE SET
+			   reads_used = user_monthly_read_usage.reads_used + 1,
+			   updated_at = NOW()
+			 WHERE user_monthly_read_usage.reads_used < $2
+			 RETURNING reads_used`,
+			userID, access.MonthlyReadLimit,
+		).Scan(&used)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return articleReadAccess{Allowed: false}, nil
+		}
+		if err != nil {
+			return articleReadAccess{}, err
+		}
+	} else {
+		var chosenArticleID uuid.UUID
+		err = tx.QueryRow(ctx,
+			`SELECT article_id FROM user_category_daily_reads
+			 WHERE user_id = $1 AND read_category = $2 AND read_date = CURRENT_DATE`,
+			userID, category,
+		).Scan(&chosenArticleID)
+		if err == nil && chosenArticleID != articleID {
+			return articleReadAccess{Allowed: false}, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return articleReadAccess{}, err
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO user_category_daily_reads (user_id, read_category, article_id)
+				 VALUES ($1, $2, $3)`,
+				userID, category, articleID,
+			); err != nil {
+				return articleReadAccess{}, err
+			}
+		}
 	}
-	return true, tx.Commit(ctx)
-}
 
-func (h *Handler) recordMonthlyArticleRead(ctx context.Context, userID, articleID uuid.UUID, limit int) (bool, error) {
-	tx, err := h.pool.Begin(ctx)
+	var expiresAt time.Time
+	err = tx.QueryRow(ctx,
+		`INSERT INTO user_article_access_grants (user_id, article_id, granted_at, expires_at)
+		 VALUES ($1, $2, NOW(), NOW() + make_interval(days => $3))
+		 ON CONFLICT (user_id, article_id) DO UPDATE SET
+		   granted_at = EXCLUDED.granted_at,
+		   expires_at = EXCLUDED.expires_at
+		 RETURNING expires_at`,
+		userID, articleID, articleAccessRetentionDays,
+	).Scan(&expiresAt)
 	if err != nil {
-		return false, err
+		return articleReadAccess{}, err
 	}
-	defer tx.Rollback(ctx)
-
-	lockKey := userID.String() + ":monthly-article-reads"
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", lockKey); err != nil {
-		return false, err
+	if err := tx.Commit(ctx); err != nil {
+		return articleReadAccess{}, err
 	}
-
-	var alreadyRead bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM user_monthly_article_reads
-			WHERE user_id = $1 AND article_id = $2
-			  AND period_start = date_trunc('month', CURRENT_DATE)::date
-		)`, userID, articleID,
-	).Scan(&alreadyRead); err != nil {
-		return false, err
-	}
-	if alreadyRead {
-		return true, tx.Commit(ctx)
-	}
-
-	var used int
-	if err := tx.QueryRow(ctx,
-		`SELECT COUNT(*) FROM user_monthly_article_reads
-		 WHERE user_id = $1
-		   AND period_start = date_trunc('month', CURRENT_DATE)::date`, userID,
-	).Scan(&used); err != nil {
-		return false, err
-	}
-	if used >= limit {
-		return false, tx.Rollback(ctx)
-	}
-
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_monthly_article_reads (user_id, article_id, period_start)
-		 VALUES ($1, $2, date_trunc('month', CURRENT_DATE)::date)`, userID, articleID,
-	); err != nil {
-		return false, err
-	}
-	return true, tx.Commit(ctx)
+	return articleReadAccess{Allowed: true, ExpiresAt: &expiresAt}, nil
 }
 
 func articleReadLimitMessage(access readingEntitlement, category string) string {

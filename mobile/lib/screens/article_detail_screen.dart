@@ -10,6 +10,7 @@ import '../models/article.dart';
 import '../providers/auth_provider.dart';
 import '../providers/reader_settings_provider.dart';
 import '../services/api_service.dart';
+import '../services/article_access_cache.dart';
 import '../widgets/markdown_content.dart';
 import 'subscription_screen.dart';
 
@@ -30,6 +31,7 @@ class ArticleDetailScreen extends StatefulWidget {
 class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
   late Article _article = widget.article;
   late final PageController _pageController;
+  late final String? _userId;
   late int _currentVersion;
   Timer? _pollTimer;
   bool _isCheckingAccess = true;
@@ -47,7 +49,17 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
       (_article.versions.length - 1).clamp(0, double.maxFinite.toInt()),
     );
     _pageController = PageController(initialPage: _currentVersion);
-    _loadArticle();
+    _userId = context.read<AuthProvider>().user?.id;
+    final cached =
+        _userId == null ? null : ArticleAccessCache.peek(_userId, _article.id);
+    if (cached != null) {
+      _article = cached;
+      _isCheckingAccess = false;
+      _hasLoadedArticle = true;
+      unawaited(_loadArticle());
+    } else {
+      unawaited(_loadCachedOrRemote());
+    }
   }
 
   @override
@@ -97,6 +109,25 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
     }
   }
 
+  Future<void> _loadCachedOrRemote() async {
+    final userId = _userId;
+    final cached = userId == null
+        ? null
+        : await ArticleAccessCache.get(userId, _article.id);
+    if (!mounted) return;
+    if (cached != null) {
+      setState(() {
+        _article = cached;
+        _isCheckingAccess = false;
+        _hasLoadedArticle = true;
+        _accessError = null;
+      });
+      unawaited(_loadArticle());
+      return;
+    }
+    await _loadArticle();
+  }
+
   Future<void> _loadArticle({bool showLoading = false}) async {
     if (showLoading && mounted) {
       setState(() {
@@ -106,6 +137,10 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
     }
     try {
       final data = await ApiService.getArticle(_article.id);
+      final userId = _userId;
+      if (userId != null) {
+        unawaited(ArticleAccessCache.put(userId, data));
+      }
       if (!mounted) return;
       setState(() {
         _article = Article.fromJson(data);
@@ -116,10 +151,7 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
       _schedulePollingIfNeeded();
     } on ApiException catch (e) {
       if (!mounted) return;
-      if (!_hasLoadedArticle ||
-          e.statusCode == 401 ||
-          e.statusCode == 403 ||
-          e.statusCode == 429) {
+      if (!_hasLoadedArticle) {
         setState(() {
           _isCheckingAccess = false;
           _accessError = e;
@@ -161,21 +193,6 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final article = _article;
-    if (_isCheckingAccess) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Opening story')),
-        body: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Checking your daily reading access…'),
-            ],
-          ),
-        ),
-      );
-    }
     if (_accessError case final error?) {
       return _ArticleAccessScreen(
         article: article,
@@ -238,22 +255,35 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
                     ),
                   )
                 : null,
-            bottom: hasMultiple
+            bottom: hasMultiple || _isCheckingAccess
                 ? PreferredSize(
-                    preferredSize: const Size.fromHeight(52),
-                    child: _VersionTabBar(
-                      versions: article.versions,
-                      current: _currentVersion,
-                      labelFor: _tabLabel,
-                      onTap: (i) {
-                        setState(() => _currentVersion = i);
-                        _pageController.animateToPage(
-                          i,
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                        );
-                      },
-                      theme: theme,
+                    preferredSize: Size.fromHeight((hasMultiple ? 52 : 0) + 2),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (hasMultiple)
+                          _VersionTabBar(
+                            versions: article.versions,
+                            current: _currentVersion,
+                            labelFor: _tabLabel,
+                            onTap: (i) {
+                              setState(() => _currentVersion = i);
+                              _pageController.animateToPage(
+                                i,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              );
+                            },
+                            theme: theme,
+                          ),
+                        if (_isCheckingAccess)
+                          const LinearProgressIndicator(
+                            minHeight: 2,
+                            semanticsLabel: 'Opening full story',
+                          )
+                        else
+                          const SizedBox(height: 2),
+                      ],
                     ),
                   )
                 : null,

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/article_access_cache.dart';
 
 class AuthProvider extends ChangeNotifier {
   User? _user;
@@ -21,6 +24,7 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.getMe();
       if (data != null) {
         _user = User.fromJson(data);
+        unawaited(ArticleAccessCache.warm(_user!.id));
       } else {
         await ApiService.clearToken();
       }
@@ -53,6 +57,7 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.login(email, password);
       await ApiService.saveToken(data['access_token']);
       _user = User.fromJson(data['user']);
+      unawaited(ArticleAccessCache.warm(_user!.id));
       return true;
     } on ApiException catch (e) {
       _error = e.message;
@@ -74,6 +79,7 @@ class AuthProvider extends ChangeNotifier {
       final data = await ApiService.register(email, password, name);
       await ApiService.saveToken(data['access_token']);
       _user = User.fromJson(data['user']);
+      unawaited(ArticleAccessCache.warm(_user!.id));
       return true;
     } on ApiException catch (e) {
       _error = e.message;
@@ -89,6 +95,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     await ApiService.clearToken();
+    ArticleAccessCache.clearMemory();
     _user = null;
     notifyListeners();
   }

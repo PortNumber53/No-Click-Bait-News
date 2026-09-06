@@ -330,16 +330,17 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	readCategory := articleReadCategory(a.Category, a.Categories)
-	allowed, err := h.recordArticleRead(r.Context(), user.ID, articleID, readCategory, access)
+	readAccess, err := h.recordArticleRead(r.Context(), user.ID, articleID, readCategory, access)
 	if err != nil {
 		log.Printf("[articles.read] user_id=%s article_id=%s status=usage_failed error=%q", user.ID, articleID, err)
 		Error(w, http.StatusInternalServerError, "Failed to record article usage")
 		return
 	}
-	if !allowed {
+	if !readAccess.Allowed {
 		Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, readCategory))
 		return
 	}
+	a.AccessExpiresAt = readAccess.ExpiresAt
 
 	if h.tinyFish != nil && strings.TrimSpace(a.SourceURL) != "" && (a.Content == nil || strings.TrimSpace(*a.Content) == "") {
 		page, err := h.tinyFish.FetchContent(r.Context(), a.SourceURL)
@@ -419,15 +420,16 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		readCategory := articleReadCategory(existing.Category, existing.Categories)
-		allowed, err := h.recordArticleRead(r.Context(), user.ID, existing.ID, readCategory, access)
+		readAccess, err := h.recordArticleRead(r.Context(), user.ID, existing.ID, readCategory, access)
 		if err != nil {
 			Error(w, http.StatusInternalServerError, "Failed to record article usage")
 			return
 		}
-		if !allowed {
+		if !readAccess.Allowed {
 			Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, readCategory))
 			return
 		}
+		existing.AccessExpiresAt = readAccess.ExpiresAt
 		if _, err := h.pool.Exec(r.Context(), "UPDATE articles SET submitted_by_user_id = COALESCE(submitted_by_user_id, $1) WHERE id = $2", user.ID, existing.ID); err != nil {
 			log.Printf("[articles.fetch] request_id=%s status=claim_existing_failed article_id=%s user_id=%s error=%q", requestID, existing.ID, user.ID, err)
 		}
@@ -481,15 +483,16 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusInternalServerError, "Failed to save fetched article")
 		return
 	}
-	allowed, err = h.recordArticleRead(r.Context(), user.ID, article.ID, category, access)
+	readAccess, err := h.recordArticleRead(r.Context(), user.ID, article.ID, category, access)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to record article usage")
 		return
 	}
-	if !allowed {
+	if !readAccess.Allowed {
 		Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, category))
 		return
 	}
+	article.AccessExpiresAt = readAccess.ExpiresAt
 
 	log.Printf("[articles.fetch] request_id=%s status=created article_id=%s url=%q elapsed_ms=%d", requestID, article.ID, sourceURL, time.Since(start).Milliseconds())
 	JSON(w, http.StatusCreated, article)

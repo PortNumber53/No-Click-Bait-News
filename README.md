@@ -125,10 +125,16 @@ flutter run
 - **User authentication** with JWT tokens
 - **Stripe subscriptions** with Free, 60 Reads ($9.99/month), and Unlimited ($14/month) tiers
 - **Free reading** of one selected article per category each day
-- **60 Reads plan** with 60 distinct standard articles per calendar month for $9.99/month
+- **60 Reads plan** with 60 standard article grants per calendar month for $9.99/month
 - **Unlimited paid reading**, premium stories, and Stripe-hosted billing management
+- **Instant reopening** from a user-scoped local cache for active seven-day article grants
 - **Dark mode** support
 - **Material 3** design system
+
+Free and 60 Reads access grants are reusable for seven days. The backend keeps
+only those seven days of article-level grants and Free daily selections; 60 Reads
+usage is stored as one aggregate counter per user and calendar month. An hourly
+cleanup removes expired grants and older quota rows.
 
 ## API Endpoints
 

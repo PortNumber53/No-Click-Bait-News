@@ -161,6 +161,9 @@ func runServer() {
 		log.Fatalf("Unable to ping database: %v", err)
 	}
 	log.Println("Connected to database")
+	cleanupCtx, stopReadTrackingCleanup := context.WithCancel(context.Background())
+	defer stopReadTrackingCleanup()
+	go services.RunReadTrackingCleanup(cleanupCtx, pool, time.Hour)
 
 	// Sync subscription tiers with Stripe
 	if err := services.SyncSubscriptionTiers(context.Background(), pool, stripeKey); err != nil {
@@ -252,6 +255,7 @@ func runServer() {
 	signal.Notify(shutdownSignal, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-shutdownSignal
+		stopReadTrackingCleanup()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {

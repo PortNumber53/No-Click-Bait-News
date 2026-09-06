@@ -35,3 +35,9 @@ func TestArticleReadLimitMessage(t *testing.T) {
 		t.Fatalf("free limit message = %q", got)
 	}
 }
+
+func TestArticleAccessRetention(t *testing.T) {
+	if articleAccessRetentionDays != 7 {
+		t.Fatalf("article access retention = %d days, want 7", articleAccessRetentionDays)
+	}
+}

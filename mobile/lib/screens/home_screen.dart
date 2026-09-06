@@ -5,6 +5,7 @@ import '../models/article.dart';
 import '../providers/auth_provider.dart';
 import '../providers/news_provider.dart';
 import '../services/api_service.dart';
+import '../services/article_access_cache.dart';
 import '../widgets/article_version_card.dart';
 import '../widgets/shimmer_card.dart';
 import 'article_detail_screen.dart';
@@ -68,6 +69,11 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final data = await ApiService.fetchArticleUrl(url);
       final article = Article.fromJson(data);
+      if (!mounted) return;
+      final userId = context.read<AuthProvider>().user?.id;
+      if (userId != null) {
+        await ArticleAccessCache.put(userId, data);
+      }
       if (!mounted) return;
       _urlController.clear();
       Navigator.push(
