@@ -98,13 +98,144 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) await context.read<AuthProvider>().refreshUser();
   }
 
+  Future<void> _openNewsTools() async {
+    final theme = Theme.of(context);
+    final tier = context.read<AuthProvider>().user?.subscriptionTier;
+    final isUnlimited = tier != null && tier != 'free';
+    final action = await showModalBottomSheet<_NewsToolsAction>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            20 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF087F74), Color(0xFF20A58E)],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.add_link_rounded,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('News tools', style: theme.textTheme.titleLarge),
+                        Text(
+                          'Submit a link or manage your reading plan',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                decoration: BoxDecoration(
+                  color: isUnlimited
+                      ? theme.colorScheme.tertiaryContainer
+                      : theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isUnlimited
+                          ? Icons.all_inclusive_rounded
+                          : Icons.today_rounded,
+                      color: isUnlimited
+                          ? theme.colorScheme.onTertiaryContainer
+                          : theme.colorScheme.onSecondaryContainer,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        isUnlimited
+                            ? 'Unlimited reading'
+                            : 'Free · 1 story per category today',
+                        style: theme.textTheme.labelLarge,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(
+                        sheetContext,
+                        _NewsToolsAction.plans,
+                      ),
+                      child: const Text('Plans'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _urlController,
+                autofocus: true,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.go,
+                onSubmitted: (_) => Navigator.pop(
+                  sheetContext,
+                  _NewsToolsAction.fetch,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'News article URL',
+                  hintText: 'https://…',
+                  prefixIcon: Icon(Icons.link_rounded),
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => Navigator.pop(
+                    sheetContext,
+                    _NewsToolsAction.fetch,
+                  ),
+                  icon: const Icon(Icons.auto_fix_high_rounded),
+                  label: const Text('Fetch and clean article'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case _NewsToolsAction.fetch:
+        await _fetchUrl();
+      case _NewsToolsAction.plans:
+        await _openPlans();
+      case null:
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final userName = context.watch<AuthProvider>().user?.name.trim();
-    final firstName = userName == null || userName.isEmpty
-        ? 'reader'
-        : userName.split(RegExp(r'\s+')).first;
     final tier = context.watch<AuthProvider>().user?.subscriptionTier;
     final isUnlimited = tier != null && tier != 'free';
 
@@ -138,6 +269,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton.filledTonal(
+            onPressed: _isFetchingUrl ? null : _openNewsTools,
+            tooltip: 'News tools',
+            icon: _isFetchingUrl
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    isUnlimited
+                        ? Icons.all_inclusive_rounded
+                        : Icons.add_link_rounded,
+                  ),
+          ),
           PopupMenuButton<_HomeAction>(
             tooltip: 'Account and links',
             icon: const Icon(Icons.account_circle_outlined),
@@ -190,136 +336,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          Container(
-            width: double.infinity,
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF17324D), Color(0xFF087F74)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(22),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x3017324D),
-                  blurRadius: 18,
-                  offset: Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Good to see you, $firstName',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Clear reporting from across the web—without the bait.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.82),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                InkWell(
-                  onTap: _openPlans,
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.22),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isUnlimited
-                              ? Icons.all_inclusive_rounded
-                              : Icons.today_rounded,
-                          color: Colors.white,
-                          size: 17,
-                        ),
-                        const SizedBox(width: 7),
-                        Text(
-                          isUnlimited
-                              ? 'Unlimited reading'
-                              : 'Free · 1 story per category today',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: Colors.white70,
-                          size: 18,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _urlController,
-                        enabled: !_isFetchingUrl,
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.go,
-                        onSubmitted: (_) => _fetchUrl(),
-                        decoration: InputDecoration(
-                          hintText: 'Paste a news link',
-                          prefixIcon: const Icon(Icons.add_link_rounded),
-                          fillColor: Colors.white.withValues(alpha: 0.96),
-                          hintStyle: TextStyle(
-                            color:
-                                const Color(0xFF17324D).withValues(alpha: 0.62),
-                          ),
-                          prefixIconColor: const Color(0xFF087F74),
-                          isDense: true,
-                        ),
-                        style: const TextStyle(color: Color(0xFF17324D)),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFFF06449),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(50, 50),
-                      ),
-                      tooltip: 'Clean up this article',
-                      onPressed: _isFetchingUrl ? null : _fetchUrl,
-                      icon: _isFetchingUrl
-                          ? const SizedBox(
-                              width: 19,
-                              height: 19,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.arrow_forward_rounded),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
           Consumer<NewsProvider>(
             builder: (context, news, _) {
               return SizedBox(
@@ -467,6 +483,8 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 enum _HomeAction { myUrls, plans, signOut }
+
+enum _NewsToolsAction { fetch, plans }
 
 class _CategoryFilter {
   final String? value;
