@@ -85,21 +85,21 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       final data = await ApiService.createCheckout(tier.id);
       final url = data['checkout_url'] as String?;
       if (url == null) {
-        throw const ApiException(502, 'Stripe checkout is unavailable');
+        throw const ApiException(502, 'Checkout is unavailable');
       }
       final launched = await launchUrl(
         Uri.parse(url),
         mode: LaunchMode.externalApplication,
       );
       if (!launched) {
-        throw const ApiException(502, 'Could not open Stripe checkout');
+        throw const ApiException(502, 'Could not open checkout');
       }
       if (mounted) {
         setState(() => _waitingForCheckout = true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Finish secure checkout in Stripe, then return here.',
+              'Finish checkout, then return here.',
             ),
           ),
         );
@@ -117,7 +117,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not open Stripe checkout'),
+            content: Text('Could not open checkout'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -138,7 +138,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
             Uri.parse(url),
             mode: LaunchMode.externalApplication,
           )) {
-        throw const ApiException(502, 'Could not open Stripe billing');
+        throw const ApiException(502, 'Could not open billing settings');
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -149,7 +149,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open Stripe billing')),
+          const SnackBar(content: Text('Could not open billing settings')),
         );
       }
     } finally {
@@ -163,7 +163,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Subscription Plans'),
+        title: const Text('Choose your plan'),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -204,7 +204,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
-                                    'Payments and invoices are handled by Stripe.',
+                                    'Payments and invoices are handled securely.',
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: Colors.white70,
                                     ),
@@ -227,7 +227,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                                 const SizedBox(width: 12),
                                 const Expanded(
                                   child: Text(
-                                    'Waiting for Stripe to confirm your plan.',
+                                    'Waiting for payment confirmation.',
                                   ),
                                 ),
                                 TextButton(
@@ -384,7 +384,7 @@ class _TierCard extends StatelessWidget {
               const SizedBox(height: 10),
               Center(
                 child: Text(
-                  'Renews monthly. Cancel anytime in Stripe.',
+                  'Renews monthly. Cancel anytime.',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -479,7 +479,7 @@ class _ActionButton extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.open_in_new_rounded),
-          label: const Text('Manage billing with Stripe'),
+          label: const Text('Manage billing'),
         );
       }
       return const FilledButton.tonal(
@@ -501,7 +501,7 @@ class _ActionButton extends StatelessWidget {
               width: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Text('Continue with Stripe'),
+          : const Text('Continue'),
     );
   }
 }

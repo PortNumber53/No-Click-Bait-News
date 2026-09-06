@@ -207,7 +207,7 @@ class ApiService {
     }
     throw ApiException(
       response.statusCode,
-      _responseError(response, 'Failed to open Stripe billing'),
+      _responseError(response, 'Failed to open billing settings'),
     );
   }
 

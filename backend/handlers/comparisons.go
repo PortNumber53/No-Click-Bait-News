@@ -23,15 +23,11 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 
 	// Get article metadata
 	var resp models.ComparisonResponse
-	var categories []string
-	var isPremium bool
 	err = h.pool.QueryRow(r.Context(),
-		`SELECT id, COALESCE(original_title, title), source_name, source_url, image_url, category,
-		        COALESCE(categories, CASE WHEN category IS NULL OR category = '' THEN ARRAY[]::text[] ELSE ARRAY[category] END),
-		        published_at, COALESCE(is_premium, false)
+		`SELECT id, COALESCE(original_title, title), source_name, source_url, image_url, category, published_at
 		 FROM articles WHERE id = $1`, articleID,
 	).Scan(&resp.ArticleID, &resp.OriginalTitle, &resp.SourceName, &resp.SourceURL,
-		&resp.ImageURL, &resp.Category, &categories, &resp.PublishedAt, &isPremium)
+		&resp.ImageURL, &resp.Category, &resp.PublishedAt)
 	if err != nil {
 		Error(w, http.StatusNotFound, "Article not found")
 		return
@@ -57,34 +53,12 @@ func (h *Handler) GetComparison(w http.ResponseWriter, r *http.Request) {
 	idxA, idxB := pickPair(seed, len(rewrites))
 	resp.VersionA = rewrites[idxA]
 	resp.VersionB = rewrites[idxB]
-	if r.URL.Query().Get("preview") == "true" {
-		resp.VersionA.Content = nil
-		resp.VersionB.Content = nil
-	} else {
-		if user == nil {
-			Error(w, http.StatusUnauthorized, "Sign in to read articles")
-			return
-		}
-		unlimited, err := h.hasUnlimitedReading(r.Context(), user.ID)
-		if err != nil {
-			Error(w, http.StatusInternalServerError, "Failed to check article access")
-			return
-		}
-		if isPremium && !unlimited {
-			Error(w, http.StatusForbidden, "This story is available with Unlimited")
-			return
-		}
-		category := articleReadCategory(resp.Category, categories)
-		allowed, err := h.recordArticleRead(r.Context(), user.ID, articleID, category, unlimited)
-		if err != nil {
-			Error(w, http.StatusInternalServerError, "Failed to record article usage")
-			return
-		}
-		if !allowed {
-			Error(w, http.StatusTooManyRequests, "Your free category selection is already set for today")
-			return
-		}
-	}
+	// Comparisons are loaded eagerly by feed clients, including older app
+	// versions that did not send the preview query parameter. Never expose full
+	// article text or consume a daily category selection here. GetArticle is the
+	// single entitlement gate and returns the selected rewrites with content.
+	resp.VersionA.Content = nil
+	resp.VersionB.Content = nil
 
 	// Check if user already voted
 	if user != nil {

@@ -42,7 +42,7 @@ export function SubscriptionPage() {
       const data = await api.createBillingPortal();
       window.location.href = data.portal_url;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to open Stripe billing');
+      setError(e instanceof Error ? e.message : 'Failed to open billing settings');
       setIsManaging(false);
     }
   };
@@ -59,7 +59,7 @@ export function SubscriptionPage() {
       </div>
       {searchParams.get('success') === 'true' && (
         <p className="sub__notice sub__notice--success" role="status">
-          Stripe checkout completed. Your Unlimited access will appear as soon as payment is confirmed.
+          Checkout completed. Your Unlimited access will appear as soon as payment is confirmed.
         </p>
       )}
       {searchParams.get('canceled') === 'true' && (
@@ -90,7 +90,7 @@ export function SubscriptionPage() {
                   onClick={manageBilling}
                   disabled={isManaging}
                 >
-                  {isManaging ? 'Opening Stripe...' : 'Manage billing with Stripe'}
+                  {isManaging ? 'Opening billing...' : 'Manage billing'}
                 </button>
               ) : tier.is_current ? (
                 <button className="btn btn--tonal sub-card__btn" disabled>
@@ -102,7 +102,7 @@ export function SubscriptionPage() {
                   onClick={() => subscribe(tier)}
                   disabled={subscribing === tier.id}
                 >
-                  {subscribing === tier.id ? 'Opening Stripe...' : 'Continue with Stripe'}
+                  {subscribing === tier.id ? 'Opening checkout...' : 'Continue'}
                 </button>
               ) : (
                 <button className="btn btn--tonal sub-card__btn" disabled>

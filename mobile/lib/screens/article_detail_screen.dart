@@ -367,7 +367,7 @@ class _ArticleAccessScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Secure monthly billing through Stripe. Cancel anytime.',
+                    'Secure monthly billing. Cancel anytime.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

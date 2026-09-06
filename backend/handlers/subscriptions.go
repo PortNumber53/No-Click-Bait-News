@@ -164,7 +164,7 @@ func (h *Handler) CreateBillingPortal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user.StripeCustomerID == nil || strings.TrimSpace(*user.StripeCustomerID) == "" {
-		Error(w, http.StatusBadRequest, "No Stripe billing account is available")
+		Error(w, http.StatusBadRequest, "No billing account is available")
 		return
 	}
 
@@ -179,7 +179,7 @@ func (h *Handler) CreateBillingPortal(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Printf("[billing.portal] user_id=%s status=create_failed error=%q", user.ID, err)
-		Error(w, http.StatusBadGateway, "Failed to open Stripe billing")
+		Error(w, http.StatusBadGateway, "Failed to open billing settings")
 		return
 	}
 
