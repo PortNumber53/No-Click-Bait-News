@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/stripe/stripe-go/v82"
+	billingPortalSession "github.com/stripe/stripe-go/v82/billingportal/session"
 	"github.com/stripe/stripe-go/v82/checkout/session"
 	subscriptionAPI "github.com/stripe/stripe-go/v82/subscription"
 	"github.com/stripe/stripe-go/v82/webhook"
@@ -21,21 +22,29 @@ import (
 )
 
 func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
-	// Get user's current tier if authenticated
-	var currentTierID int
+	// Legacy paid plans also receive Unlimited and are represented as the
+	// current paid plan even though they are no longer available for purchase.
+	currentIsPaid := false
 	user := middleware.GetUser(r.Context())
 	if user != nil {
-		h.pool.QueryRow(r.Context(),
-			`SELECT COALESCE(
-				(SELECT tier_id FROM user_subscriptions WHERE user_id = $1 AND status IN ('active', 'trialing')),
-				(SELECT id FROM subscription_tiers WHERE name = 'free')
+		if err := h.pool.QueryRow(r.Context(),
+			`SELECT EXISTS(
+				SELECT 1 FROM user_subscriptions us
+				JOIN subscription_tiers st ON st.id = us.tier_id
+				WHERE us.user_id = $1
+				  AND us.status IN ('active', 'trialing')
+				  AND (st.unlimited_reading OR st.price_monthly > 0)
 			)`,
 			user.ID,
-		).Scan(&currentTierID)
+		).Scan(&currentIsPaid); err != nil {
+			Error(w, http.StatusInternalServerError, "Failed to check current plan")
+			return
+		}
 	}
 
 	rows, err := h.pool.Query(r.Context(),
-		"SELECT id, name, price_monthly, max_articles_per_day, has_premium_access FROM subscription_tiers")
+		`SELECT id, name, price_monthly, max_articles_per_day, has_premium_access, unlimited_reading
+		 FROM subscription_tiers WHERE is_active = true ORDER BY price_monthly`)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to fetch tiers")
 		return
@@ -45,10 +54,10 @@ func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
 	tiers := make([]models.TierResponse, 0)
 	for rows.Next() {
 		var t models.TierResponse
-		if err := rows.Scan(&t.ID, &t.Name, &t.PriceMonthly, &t.MaxArticlesPerDay, &t.HasPremiumAccess); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.PriceMonthly, &t.MaxArticlesPerDay, &t.HasPremiumAccess, &t.UnlimitedReading); err != nil {
 			continue
 		}
-		t.IsCurrent = t.ID == currentTierID
+		t.IsCurrent = (currentIsPaid && t.UnlimitedReading) || (!currentIsPaid && t.Name == "free")
 		tiers = append(tiers, t)
 	}
 
@@ -90,7 +99,8 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 		StripePriceID *string
 	}
 	err := h.pool.QueryRow(r.Context(),
-		"SELECT id, stripe_price_id FROM subscription_tiers WHERE id = $1", req.TierID,
+		`SELECT id, stripe_price_id FROM subscription_tiers
+		 WHERE id = $1 AND is_active = true AND price_monthly > 0`, req.TierID,
 	).Scan(&tier.ID, &tier.StripePriceID)
 	if err != nil || tier.StripePriceID == nil {
 		Error(w, http.StatusBadRequest, "Invalid tier or tier not available for purchase")
@@ -103,7 +113,7 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 	if origin == "" {
 		origin = "https://ncbnews.truvis.co"
 	}
-	successURL := origin + "/subscriptions?success=true"
+	successURL := origin + "/subscriptions?success=true&session_id={CHECKOUT_SESSION_ID}"
 	cancelURL := origin + "/subscriptions?canceled=true"
 
 	params := &stripe.CheckoutSessionParams{
@@ -111,8 +121,15 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 		LineItems: []*stripe.CheckoutSessionLineItemParams{
 			{Price: tier.StripePriceID, Quantity: stripe.Int64(1)},
 		},
-		SuccessURL: &successURL,
-		CancelURL:  &cancelURL,
+		SuccessURL:        &successURL,
+		CancelURL:         &cancelURL,
+		ClientReferenceID: stripe.String(user.ID.String()),
+		SubscriptionData: &stripe.CheckoutSessionSubscriptionDataParams{
+			Metadata: map[string]string{
+				"user_id": user.ID.String(),
+				"tier_id": strconv.Itoa(tier.ID),
+			},
+		},
 		Params: stripe.Params{
 			Metadata: map[string]string{
 				"user_id": user.ID.String(),
@@ -136,6 +153,37 @@ func (h *Handler) CreateCheckout(w http.ResponseWriter, r *http.Request) {
 		CheckoutURL: sess.URL,
 		SessionID:   sess.ID,
 	})
+}
+
+// CreateBillingPortal creates a short-lived Stripe-hosted session where a
+// customer can update payment methods, view invoices, or cancel their plan.
+func (h *Handler) CreateBillingPortal(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r.Context())
+	if user == nil {
+		Error(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+	if user.StripeCustomerID == nil || strings.TrimSpace(*user.StripeCustomerID) == "" {
+		Error(w, http.StatusBadRequest, "No Stripe billing account is available")
+		return
+	}
+
+	stripe.Key = h.stripeKey
+	origin := strings.TrimRight(strings.TrimSpace(os.Getenv("CHECKOUT_RETURN_ORIGIN")), "/")
+	if origin == "" {
+		origin = "https://ncbnews.truvis.co"
+	}
+	portal, err := billingPortalSession.New(&stripe.BillingPortalSessionParams{
+		Customer:  user.StripeCustomerID,
+		ReturnURL: stripe.String(origin + "/subscriptions"),
+	})
+	if err != nil {
+		log.Printf("[billing.portal] user_id=%s status=create_failed error=%q", user.ID, err)
+		Error(w, http.StatusBadGateway, "Failed to open Stripe billing")
+		return
+	}
+
+	JSON(w, http.StatusOK, models.BillingPortalResponse{PortalURL: portal.URL})
 }
 
 // StripeWebhookThin handles thin (event-only) webhook payloads.
@@ -274,6 +322,15 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, sess *stripe.Chec
 	if sess.Subscription != nil {
 		subID = sess.Subscription.ID
 	}
+	if subID == "" {
+		return fmt.Errorf("checkout subscription ID is missing")
+	}
+	stripe.Key = h.stripeKey
+	sub, err := subscriptionAPI.Get(subID, &stripe.SubscriptionParams{})
+	if err != nil {
+		return fmt.Errorf("fetch checkout subscription: %w", err)
+	}
+	status := string(sub.Status)
 
 	// Upsert subscription
 	var customerID *string
@@ -292,9 +349,9 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, sess *stripe.Chec
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO user_subscriptions (id, user_id, tier_id, stripe_subscription_id, status, created_at, updated_at)
-		 VALUES (gen_random_uuid(), $1, $2, $3, 'active', NOW(), NOW())
-		 ON CONFLICT (user_id) DO UPDATE SET tier_id = $2, stripe_subscription_id = $3, status = 'active', updated_at = NOW()`,
-		userID, tid, subID,
+		 VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
+		 ON CONFLICT (user_id) DO UPDATE SET tier_id = $2, stripe_subscription_id = $3, status = $4, updated_at = NOW()`,
+		userID, tid, subID, status,
 	); err != nil {
 		return err
 	}
@@ -306,23 +363,13 @@ func (h *Handler) handleSubscriptionUpdated(ctx context.Context, sub *stripe.Sub
 		return fmt.Errorf("subscription ID is missing")
 	}
 	status := string(sub.Status)
-	if status == "active" || status == "trialing" {
-		tag, err := h.pool.Exec(ctx,
-			"UPDATE user_subscriptions SET status = $1, updated_at = NOW() WHERE stripe_subscription_id = $2",
-			status, sub.ID,
-		)
-		if err == nil && tag.RowsAffected() == 0 {
-			return fmt.Errorf("subscription %s is not linked to a user", sub.ID)
-		}
-		return err
-	}
-	_, err := h.pool.Exec(ctx,
-		`UPDATE user_subscriptions
-		 SET tier_id = (SELECT id FROM subscription_tiers WHERE name = 'free'),
-		     status = $1,
-		     updated_at = NOW()
+	tag, err := h.pool.Exec(ctx,
+		`UPDATE user_subscriptions SET status = $1, updated_at = NOW()
 		 WHERE stripe_subscription_id = $2`,
 		status, sub.ID,
 	)
+	if err == nil && tag.RowsAffected() == 0 {
+		return fmt.Errorf("subscription %s is not linked to a user", sub.ID)
+	}
 	return err
 }

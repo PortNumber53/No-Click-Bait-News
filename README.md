@@ -87,6 +87,12 @@ TinyFish settings:
 | `LLM_REWRITE_MAX_ATTEMPTS` | `3` | Durable rewrite attempts before marking an article failed |
 | `CHECKOUT_RETURN_ORIGIN` | `https://ncbnews.truvis.co` | Trusted Stripe checkout return origin |
 
+Stripe Checkout uses recurring monthly Prices created by the backend's tier sync.
+Configure the Stripe Customer Portal in the Stripe Dashboard before exposing billing
+management; the app creates short-lived portal sessions for existing customers.
+Existing paid subscriptions retain their current Stripe Price while receiving the
+Unlimited entitlement. New checkouts use the active $14/month Price.
+
 Rewrite work is persisted in PostgreSQL and survives API restarts. Configure at
 least two models through `LLM_MODELS` (or a comma-separated `LLM_MODEL`) to populate
 the comparison and voting views. `backend/scripts/process_news.py` is retained only
@@ -117,8 +123,9 @@ flutter run
 - **Category filtering** (Technology, Science, Business, Health, Sports, World)
 - **Shimmer loading** placeholders for smooth UX
 - **User authentication** with JWT tokens
-- **Stripe subscriptions** with 3 tiers: Free, Basic ($4.99/mo), Premium ($9.99/mo)
-- **Premium content** gating based on subscription tier
+- **Stripe subscriptions** with Free and Unlimited ($14/month) tiers
+- **Free reading** of one selected article per category each day
+- **Unlimited paid reading**, premium stories, and Stripe-hosted billing management
 - **Dark mode** support
 - **Material 3** design system
 
@@ -135,5 +142,6 @@ flutter run
 | POST | `/api/v1/articles/{id}/vote` | Vote on the presented rewrite pair |
 | GET | `/api/v1/subscriptions/tiers` | List subscription tiers |
 | POST | `/api/v1/subscriptions/checkout` | Create Stripe checkout |
+| POST | `/api/v1/subscriptions/portal` | Open Stripe billing management |
 | POST | `/webhook/stripe/snapshot` | Stripe snapshot webhook handler |
 | POST | `/webhook/stripe/thin` | Optional Stripe thin webhook handler |

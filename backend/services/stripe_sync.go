@@ -29,7 +29,7 @@ func SyncSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool, stripeKey st
 
 	rows, err := pool.Query(ctx,
 		`SELECT id, name, stripe_product_id, stripe_price_id, price_monthly, max_articles_per_day, has_premium_access
-		 FROM subscription_tiers ORDER BY id`)
+		 FROM subscription_tiers WHERE is_active = true ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("query tiers: %w", err)
 	}

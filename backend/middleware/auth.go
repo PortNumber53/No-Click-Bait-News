@@ -51,14 +51,11 @@ func (a *Auth) parseToken(r *http.Request) (*models.User, error) {
 	}
 
 	var user models.User
-	var tierName *string
 	err = a.pool.QueryRow(r.Context(),
-		`SELECT u.id, u.email, u.name, u.hashed_password, u.stripe_customer_id, u.created_at, u.updated_at, st.name
+		`SELECT u.id, u.email, u.name, u.hashed_password, u.stripe_customer_id, u.created_at, u.updated_at
 		 FROM users u
-		 LEFT JOIN user_subscriptions us ON us.user_id = u.id
-		 LEFT JOIN subscription_tiers st ON st.id = us.tier_id
 		 WHERE u.id = $1`, userID,
-	).Scan(&user.ID, &user.Email, &user.Name, &user.HashedPassword, &user.StripeCustomerID, &user.CreatedAt, &user.UpdatedAt, &tierName)
+	).Scan(&user.ID, &user.Email, &user.Name, &user.HashedPassword, &user.StripeCustomerID, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

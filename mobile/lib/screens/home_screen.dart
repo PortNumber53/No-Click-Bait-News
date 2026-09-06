@@ -90,6 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openPlans() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+    );
+    if (mounted) await context.read<AuthProvider>().refreshUser();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -97,6 +105,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final firstName = userName == null || userName.isEmpty
         ? 'reader'
         : userName.split(RegExp(r'\s+')).first;
+    final tier = context.watch<AuthProvider>().user?.subscriptionTier;
+    final isUnlimited = tier != null && tier != 'free';
 
     return Scaffold(
       appBar: AppBar(
@@ -140,12 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                   break;
                 case _HomeAction.plans:
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SubscriptionScreen(),
-                    ),
-                  );
+                  _openPlans();
                   break;
                 case _HomeAction.signOut:
                   context.read<AuthProvider>().logout();
@@ -218,6 +223,52 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Clear reporting from across the web—without the bait.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: Colors.white.withValues(alpha: 0.82),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                InkWell(
+                  onTap: _openPlans,
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isUnlimited
+                              ? Icons.all_inclusive_rounded
+                              : Icons.today_rounded,
+                          color: Colors.white,
+                          size: 17,
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          isUnlimited
+                              ? 'Unlimited reading'
+                              : 'Free · 1 story per category today',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          color: Colors.white70,
+                          size: 18,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),

@@ -45,6 +45,7 @@ type SubscriptionTier struct {
 	PriceMonthly      float64 `json:"price_monthly"`
 	MaxArticlesPerDay int     `json:"max_articles_per_day"`
 	HasPremiumAccess  bool    `json:"has_premium_access"`
+	UnlimitedReading  bool    `json:"unlimited_reading"`
 }
 
 type UserSubscription struct {
@@ -120,6 +121,7 @@ type TierResponse struct {
 	PriceMonthly      float64 `json:"price_monthly"`
 	MaxArticlesPerDay int     `json:"max_articles_per_day"`
 	HasPremiumAccess  bool    `json:"has_premium_access"`
+	UnlimitedReading  bool    `json:"unlimited_reading"`
 	IsCurrent         bool    `json:"is_current"`
 }
 
@@ -130,6 +132,10 @@ type CheckoutRequest struct {
 type CheckoutResponse struct {
 	CheckoutURL string `json:"checkout_url"`
 	SessionID   string `json:"session_id"`
+}
+
+type BillingPortalResponse struct {
+	PortalURL string `json:"portal_url"`
 }
 
 // LLM comparison types

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/subscription_tier.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 
 class SubscriptionScreen extends StatefulWidget {
@@ -11,30 +13,61 @@ class SubscriptionScreen extends StatefulWidget {
   State<SubscriptionScreen> createState() => _SubscriptionScreenState();
 }
 
-class _SubscriptionScreenState extends State<SubscriptionScreen> {
+class _SubscriptionScreenState extends State<SubscriptionScreen>
+    with WidgetsBindingObserver {
   List<SubscriptionTier> _tiers = [];
   bool _isLoading = true;
   String? _error;
   int? _subscribingId;
+  bool _isOpeningPortal = false;
+  bool _waitingForCheckout = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadTiers();
   }
 
-  Future<void> _loadTiers() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForCheckout) {
+      _loadTiers(showLoading: false);
+    }
+  }
+
+  Future<void> _loadTiers({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       final data = await ApiService.getSubscriptionTiers();
       if (mounted) {
+        final tiers = data
+            .map((t) => SubscriptionTier.fromJson(t as Map<String, dynamic>))
+            .toList();
+        final becameUnlimited =
+            tiers.any((tier) => tier.isCurrent && tier.unlimitedReading);
         setState(() {
-          _tiers = data.map((t) => SubscriptionTier.fromJson(t as Map<String, dynamic>)).toList();
+          _tiers = tiers;
           _isLoading = false;
+          _error = null;
+          if (becameUnlimited) {
+            _waitingForCheckout = false;
+          }
         });
+        if (becameUnlimited) {
+          await context.read<AuthProvider>().refreshUser();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -51,11 +84,25 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     try {
       final data = await ApiService.createCheckout(tier.id);
       final url = data['checkout_url'] as String?;
-      if (url != null) {
-        final uri = Uri.parse(url);
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
+      if (url == null) {
+        throw const ApiException(502, 'Stripe checkout is unavailable');
+      }
+      final launched = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw const ApiException(502, 'Could not open Stripe checkout');
+      }
+      if (mounted) {
+        setState(() => _waitingForCheckout = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Finish secure checkout in Stripe, then return here.',
+            ),
+          ),
+        );
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -66,8 +113,47 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           ),
         );
       }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open Stripe checkout'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _subscribingId = null);
+    }
+  }
+
+  Future<void> _manageBilling() async {
+    if (_isOpeningPortal) return;
+    setState(() => _isOpeningPortal = true);
+    try {
+      final data = await ApiService.createBillingPortal();
+      final url = data['portal_url'] as String?;
+      if (url == null ||
+          !await launchUrl(
+            Uri.parse(url),
+            mode: LaunchMode.externalApplication,
+          )) {
+        throw const ApiException(502, 'Could not open Stripe billing');
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Stripe billing')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isOpeningPortal = false);
     }
   }
 
@@ -88,20 +174,77 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Text(
-                          'Choose a plan that works for you',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 18),
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF17324D), Color(0xFF087F74)],
                           ),
-                          textAlign: TextAlign.center,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.lock_rounded,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Simple, secure billing',
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Payments and invoices are handled by Stripe.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                      if (_waitingForCheckout)
+                        Card(
+                          color: theme.colorScheme.tertiaryContainer,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.hourglass_top_rounded),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'Waiting for Stripe to confirm your plan.',
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () =>
+                                      _loadTiers(showLoading: false),
+                                  child: const Text('Refresh'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ..._tiers.map((tier) => _TierCard(
                             tier: tier,
                             isSubscribing: _subscribingId == tier.id,
+                            isOpeningPortal: _isOpeningPortal,
                             onSubscribe: () => _subscribe(tier),
+                            onManageBilling: _manageBilling,
                           )),
                     ],
                   ),
@@ -113,18 +256,22 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 class _TierCard extends StatelessWidget {
   final SubscriptionTier tier;
   final bool isSubscribing;
+  final bool isOpeningPortal;
   final VoidCallback onSubscribe;
+  final VoidCallback onManageBilling;
 
   const _TierCard({
     required this.tier,
     required this.isSubscribing,
+    required this.isOpeningPortal,
     required this.onSubscribe,
+    required this.onManageBilling,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isPremium = tier.name == 'premium';
+    final isPremium = tier.unlimitedReading;
     final isFree = tier.priceMonthly == 0;
 
     final borderColor = tier.isCurrent
@@ -165,7 +312,7 @@ class _TierCard extends StatelessWidget {
 
             // Name
             Text(
-              tier.name[0].toUpperCase() + tier.name.substring(1),
+              isPremium ? 'Unlimited' : 'Free',
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -202,14 +349,23 @@ class _TierCard extends StatelessWidget {
             // Features
             _FeatureRow(
               icon: Icons.article_outlined,
-              label: tier.maxArticlesPerDay >= 999
-                  ? 'Unlimited articles/day'
-                  : '${tier.maxArticlesPerDay} articles/day',
+              label: tier.unlimitedReading
+                  ? 'Unlimited news reading'
+                  : '1 article per category, every day',
             ),
-            if (tier.hasPremiumAccess)
+            if (tier.unlimitedReading) ...[
               const _FeatureRow(
                 icon: Icons.star_rounded,
-                label: 'Premium content access',
+                label: 'Every category and premium story',
+              ),
+              const _FeatureRow(
+                icon: Icons.link_rounded,
+                label: 'Unlimited submitted news links',
+              ),
+            ] else
+              const _FeatureRow(
+                icon: Icons.category_rounded,
+                label: 'A fresh choice in each category',
               ),
             const SizedBox(height: 20),
 
@@ -219,9 +375,22 @@ class _TierCard extends StatelessWidget {
               child: _ActionButton(
                 tier: tier,
                 isSubscribing: isSubscribing,
+                isOpeningPortal: isOpeningPortal,
                 onSubscribe: onSubscribe,
+                onManageBilling: onManageBilling,
               ),
             ),
+            if (!isFree) ...[
+              const SizedBox(height: 10),
+              Center(
+                child: Text(
+                  'Renews monthly. Cancel anytime in Stripe.',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -285,20 +454,37 @@ class _FeatureRow extends StatelessWidget {
 class _ActionButton extends StatelessWidget {
   final SubscriptionTier tier;
   final bool isSubscribing;
+  final bool isOpeningPortal;
   final VoidCallback onSubscribe;
+  final VoidCallback onManageBilling;
 
   const _ActionButton({
     required this.tier,
     required this.isSubscribing,
+    required this.isOpeningPortal,
     required this.onSubscribe,
+    required this.onManageBilling,
   });
 
   @override
   Widget build(BuildContext context) {
     if (tier.isCurrent) {
+      if (tier.unlimitedReading) {
+        return OutlinedButton.icon(
+          onPressed: isOpeningPortal ? null : onManageBilling,
+          icon: isOpeningPortal
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.open_in_new_rounded),
+          label: const Text('Manage billing with Stripe'),
+        );
+      }
       return const FilledButton.tonal(
         onPressed: null,
-        child: Text('Current Plan'),
+        child: Text('Current plan'),
       );
     }
     if (tier.priceMonthly == 0) {
@@ -315,7 +501,7 @@ class _ActionButton extends StatelessWidget {
               width: 18,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Text('Subscribe'),
+          : const Text('Continue with Stripe'),
     );
   }
 }

@@ -4,6 +4,7 @@ class SubscriptionTier {
   final double priceMonthly;
   final int maxArticlesPerDay;
   final bool hasPremiumAccess;
+  final bool unlimitedReading;
   final bool isCurrent;
 
   const SubscriptionTier({
@@ -12,6 +13,7 @@ class SubscriptionTier {
     required this.priceMonthly,
     required this.maxArticlesPerDay,
     required this.hasPremiumAccess,
+    required this.unlimitedReading,
     required this.isCurrent,
   });
 
@@ -22,6 +24,7 @@ class SubscriptionTier {
       priceMonthly: (json['price_monthly'] as num).toDouble(),
       maxArticlesPerDay: json['max_articles_per_day'] as int,
       hasPremiumAccess: json['has_premium_access'] as bool? ?? false,
+      unlimitedReading: json['unlimited_reading'] as bool? ?? false,
       isCurrent: json['is_current'] as bool? ?? false,
     );
   }

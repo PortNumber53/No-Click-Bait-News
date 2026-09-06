@@ -228,6 +228,7 @@ func runServer() {
 			r.Use(auth.RequireUser)
 			r.Get("/auth/me", h.GetMe)
 			r.Post("/subscriptions/checkout", h.CreateCheckout)
+			r.Post("/subscriptions/portal", h.CreateBillingPortal)
 		})
 	})
 

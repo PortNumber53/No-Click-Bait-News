@@ -119,6 +119,16 @@ export const api = {
     );
   },
 
+  createBillingPortal() {
+    return request<{ portal_url: string }>(
+      `${API_BASE}/subscriptions/portal`,
+      {
+        method: 'POST',
+        headers: headers(true),
+      },
+    );
+  },
+
   getComparison(articleId: string) {
     return request<ComparisonData>(
       `${API_BASE}/articles/${articleId}/comparison`,

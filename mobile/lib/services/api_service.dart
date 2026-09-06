@@ -43,7 +43,8 @@ class ApiService {
     if (response.statusCode == 201) {
       return jsonDecode(response.body);
     }
-    throw ApiException(response.statusCode, jsonDecode(response.body)['detail']);
+    throw ApiException(
+        response.statusCode, jsonDecode(response.body)['detail']);
   }
 
   static Future<Map<String, dynamic>> login(
@@ -56,7 +57,8 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     }
-    throw ApiException(response.statusCode, jsonDecode(response.body)['detail']);
+    throw ApiException(
+        response.statusCode, jsonDecode(response.body)['detail']);
   }
 
   // Articles
@@ -70,8 +72,8 @@ class ApiService {
       'page_size': pageSize.toString(),
       if (category != null) 'category': category,
     };
-    final uri = Uri.parse('$baseUrl/articles/feed')
-        .replace(queryParameters: params);
+    final uri =
+        Uri.parse('$baseUrl/articles/feed').replace(queryParameters: params);
     final response = await http.get(uri, headers: await _headers(auth: true));
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
@@ -100,7 +102,10 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     }
-    throw ApiException(response.statusCode, 'Failed to fetch article');
+    throw ApiException(
+      response.statusCode,
+      _responseError(response, 'Failed to fetch article'),
+    );
   }
 
   static Future<Map<String, dynamic>> fetchArticleUrl(String url) async {
@@ -156,7 +161,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>?> getComparison(String articleId) async {
     final response = await http.get(
-      Uri.parse('$baseUrl/articles/$articleId/comparison'),
+      Uri.parse('$baseUrl/articles/$articleId/comparison?preview=true'),
       headers: await _headers(auth: true),
     );
     if (response.statusCode == 200) {
@@ -186,7 +191,33 @@ class ApiService {
     if (response.statusCode == 200) {
       return jsonDecode(response.body);
     }
-    throw ApiException(response.statusCode, 'Failed to create checkout');
+    throw ApiException(
+      response.statusCode,
+      _responseError(response, 'Failed to create checkout'),
+    );
+  }
+
+  static Future<Map<String, dynamic>> createBillingPortal() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/subscriptions/portal'),
+      headers: await _headers(auth: true),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw ApiException(
+      response.statusCode,
+      _responseError(response, 'Failed to open Stripe billing'),
+    );
+  }
+
+  static String _responseError(http.Response response, String fallback) {
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return body['detail'] as String? ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
   }
 }
 

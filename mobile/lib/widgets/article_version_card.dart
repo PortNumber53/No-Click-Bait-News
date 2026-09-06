@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:provider/provider.dart';
 
 import '../models/article.dart';
+import '../providers/reader_settings_provider.dart';
 
 class ArticleVersionCard extends StatefulWidget {
   final Article article;
@@ -44,6 +46,7 @@ class _ArticleVersionCardState extends State<ArticleVersionCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontScale = context.watch<ReaderSettingsProvider>().fontScale;
     final article = widget.article;
     final llmVersions = _llmVersions(article);
     final hasMultipleVersions = llmVersions.length >= 2;
@@ -124,6 +127,7 @@ class _ArticleVersionCardState extends State<ArticleVersionCard> {
                             version: llmVersions[i],
                             versionLabel: _labelFor(i),
                             theme: theme,
+                            fontScale: fontScale,
                           ),
                         ),
                       _VersionContent(
@@ -133,6 +137,7 @@ class _ArticleVersionCardState extends State<ArticleVersionCard> {
                             ? _labelFor(safeIndex)
                             : null,
                         theme: theme,
+                        fontScale: fontScale,
                       ),
                     ],
                   ),
@@ -155,12 +160,14 @@ class _VersionContent extends StatelessWidget {
   final Article article;
   final ArticleVersion version;
   final ThemeData theme;
+  final double fontScale;
   final String? versionLabel;
 
   const _VersionContent({
     required this.article,
     required this.version,
     required this.theme,
+    required this.fontScale,
     this.versionLabel,
   });
 
@@ -220,7 +227,8 @@ class _VersionContent extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             version.title,
-            style: theme.textTheme.titleMedium?.copyWith(
+            style:
+                _scaledStyle(theme.textTheme.titleMedium, fontScale)?.copyWith(
               fontWeight: FontWeight.bold,
               height: 1.3,
             ),
@@ -228,7 +236,8 @@ class _VersionContent extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             version.summary,
-            style: theme.textTheme.bodyMedium?.copyWith(
+            style:
+                _scaledStyle(theme.textTheme.bodyMedium, fontScale)?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
               height: 1.45,
             ),
@@ -283,6 +292,11 @@ class _VersionContent extends StatelessWidget {
         ? Color.lerp(color, Colors.white, 0.28)!
         : color;
   }
+}
+
+TextStyle? _scaledStyle(TextStyle? style, double scale) {
+  if (style == null) return null;
+  return style.copyWith(fontSize: (style.fontSize ?? 16) * scale);
 }
 
 class _VersionIndicator extends StatelessWidget {

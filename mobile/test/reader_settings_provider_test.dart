@@ -6,7 +6,10 @@ void main() {
     late ReaderSettingsProvider settings;
 
     setUp(() {
-      settings = ReaderSettingsProvider(persistChanges: false);
+      settings = ReaderSettingsProvider(
+        persistChanges: false,
+        enableHardwareControls: false,
+      );
     });
 
     test('starts at the default text size', () {

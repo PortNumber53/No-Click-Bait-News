@@ -7,6 +7,7 @@ import 'providers/reader_settings_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
+import 'widgets/reader_font_feedback_overlay.dart';
 
 void main() {
   runApp(const NoClickBaitNewsApp());
@@ -30,6 +31,9 @@ class NoClickBaitNewsApp extends StatelessWidget {
         darkTheme: AppTheme.dark(),
         themeMode: ThemeMode.system,
         home: const AuthGate(),
+        builder: (context, child) => ReaderFontFeedbackOverlay(
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
     );
   }

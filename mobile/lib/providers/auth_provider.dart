@@ -34,6 +34,17 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshUser() async {
+    try {
+      final data = await ApiService.getMe();
+      if (data == null) return;
+      _user = User.fromJson(data);
+      notifyListeners();
+    } catch (_) {
+      // Keep the current session visible if a background refresh fails.
+    }
+  }
+
   Future<bool> login(String email, String password) async {
     _isLoading = true;
     _error = null;

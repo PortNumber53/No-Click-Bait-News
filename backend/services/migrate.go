@@ -112,8 +112,12 @@ var schemaDDL = []string{
 		price_monthly NUMERIC(10,2) NOT NULL DEFAULT 0,
 		max_articles_per_day INTEGER NOT NULL DEFAULT 10,
 		has_premium_access BOOLEAN NOT NULL DEFAULT false,
+		unlimited_reading BOOLEAN NOT NULL DEFAULT false,
+		is_active BOOLEAN NOT NULL DEFAULT true,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS unlimited_reading BOOLEAN NOT NULL DEFAULT false`,
+	`ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`,
 
 	`CREATE TABLE IF NOT EXISTS user_subscriptions (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -136,6 +140,16 @@ var schemaDDL = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS ix_user_article_reads_user_date
 		ON user_article_reads (user_id, read_date)`,
+	`CREATE TABLE IF NOT EXISTS user_category_daily_reads (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		read_category VARCHAR NOT NULL,
+		read_date DATE NOT NULL DEFAULT CURRENT_DATE,
+		article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, read_category, read_date)
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_category_daily_reads_article
+		ON user_category_daily_reads (user_id, article_id, read_date)`,
 	`CREATE TABLE IF NOT EXISTS user_url_fetches (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		source_url TEXT NOT NULL,
@@ -214,22 +228,32 @@ func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 		PriceMonthly      float64
 		MaxArticlesPerDay int
 		HasPremiumAccess  bool
+		UnlimitedReading  bool
 	}{
-		{"free", 0, 10, false},
-		{"basic", 4.99, 50, false},
-		{"premium", 9.99, 999, true},
+		{"free", 0, 1, false, false},
+		{"premium", 14, 0, true, true},
 	}
 
 	for _, t := range tiers {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO subscription_tiers (name, price_monthly, max_articles_per_day, has_premium_access)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (name) DO NOTHING`,
-			t.Name, t.PriceMonthly, t.MaxArticlesPerDay, t.HasPremiumAccess,
+			`INSERT INTO subscription_tiers (name, price_monthly, max_articles_per_day, has_premium_access, unlimited_reading, is_active)
+			 VALUES ($1, $2, $3, $4, $5, true)
+			 ON CONFLICT (name) DO UPDATE SET
+			   price_monthly = EXCLUDED.price_monthly,
+			   max_articles_per_day = EXCLUDED.max_articles_per_day,
+			   has_premium_access = EXCLUDED.has_premium_access,
+			   unlimited_reading = EXCLUDED.unlimited_reading,
+			   is_active = true`,
+			t.Name, t.PriceMonthly, t.MaxArticlesPerDay, t.HasPremiumAccess, t.UnlimitedReading,
 		)
 		if err != nil {
 			return err
 		}
+	}
+	if _, err := pool.Exec(ctx,
+		"UPDATE subscription_tiers SET is_active = false WHERE name NOT IN ('free', 'premium')",
+	); err != nil {
+		return err
 	}
 	log.Println("Subscription tiers seeded")
 	return nil

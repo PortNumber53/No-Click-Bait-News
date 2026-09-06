@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,6 +11,7 @@ import '../providers/auth_provider.dart';
 import '../providers/reader_settings_provider.dart';
 import '../services/api_service.dart';
 import '../widgets/markdown_content.dart';
+import 'subscription_screen.dart';
 
 class ArticleDetailScreen extends StatefulWidget {
   final Article article;
@@ -28,15 +28,13 @@ class ArticleDetailScreen extends StatefulWidget {
 }
 
 class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
-  static const _readerChannel =
-      MethodChannel('co.truvis.ncbnews/reader_controls');
-
   late Article _article = widget.article;
   late final PageController _pageController;
   late int _currentVersion;
   Timer? _pollTimer;
-  Timer? _fontFeedbackTimer;
-  bool _showFontFeedback = false;
+  bool _isCheckingAccess = true;
+  bool _hasLoadedArticle = false;
+  ApiException? _accessError;
   // rewriteId of the version the user voted for (null = not yet voted)
   String? _votedForId;
   bool _isVoting = false;
@@ -49,47 +47,14 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
       (_article.versions.length - 1).clamp(0, double.maxFinite.toInt()),
     );
     _pageController = PageController(initialPage: _currentVersion);
-    _readerChannel.setMethodCallHandler(_handleReaderControl);
-    unawaited(_setVolumeKeyControl(true));
     _loadArticle();
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
-    _fontFeedbackTimer?.cancel();
-    unawaited(_setVolumeKeyControl(false));
-    _readerChannel.setMethodCallHandler(null);
     _pageController.dispose();
     super.dispose();
-  }
-
-  Future<void> _handleReaderControl(MethodCall call) async {
-    if (call.method != 'fontSizeDelta' || !mounted) return;
-    final settings = context.read<ReaderSettingsProvider>();
-    final delta = call.arguments as int? ?? 0;
-    if (delta > 0) {
-      settings.increaseFontSize();
-    } else if (delta < 0) {
-      settings.decreaseFontSize();
-    }
-
-    _fontFeedbackTimer?.cancel();
-    setState(() => _showFontFeedback = true);
-    _fontFeedbackTimer = Timer(const Duration(milliseconds: 1100), () {
-      if (mounted) setState(() => _showFontFeedback = false);
-    });
-  }
-
-  Future<void> _setVolumeKeyControl(bool enabled) async {
-    try {
-      await _readerChannel.invokeMethod<void>(
-        'setVolumeKeyFontControl',
-        enabled,
-      );
-    } on MissingPluginException {
-      // Physical volume-key control is an Android enhancement.
-    }
   }
 
   void _showTextSizeSheet() {
@@ -132,16 +97,58 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
     }
   }
 
-  Future<void> _loadArticle() async {
+  Future<void> _loadArticle({bool showLoading = false}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _isCheckingAccess = true;
+        _accessError = null;
+      });
+    }
     try {
       final data = await ApiService.getArticle(_article.id);
       if (!mounted) return;
-      setState(() => _article = Article.fromJson(data));
+      setState(() {
+        _article = Article.fromJson(data);
+        _isCheckingAccess = false;
+        _hasLoadedArticle = true;
+        _accessError = null;
+      });
+      _schedulePollingIfNeeded();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      if (!_hasLoadedArticle ||
+          e.statusCode == 401 ||
+          e.statusCode == 403 ||
+          e.statusCode == 429) {
+        setState(() {
+          _isCheckingAccess = false;
+          _accessError = e;
+        });
+        return;
+      }
       _schedulePollingIfNeeded();
     } catch (_) {
       if (!mounted) return;
+      if (!_hasLoadedArticle) {
+        setState(() {
+          _isCheckingAccess = false;
+          _accessError = const ApiException(
+            0,
+            'Could not connect to the news service',
+          );
+        });
+        return;
+      }
       _schedulePollingIfNeeded();
     }
+  }
+
+  Future<void> _openPlans() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+    );
+    if (mounted) await _loadArticle(showLoading: true);
   }
 
   void _schedulePollingIfNeeded() {
@@ -154,124 +161,228 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final article = _article;
+    if (_isCheckingAccess) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Opening story')),
+        body: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Checking your daily reading access…'),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_accessError case final error?) {
+      return _ArticleAccessScreen(
+        article: article,
+        error: error,
+        onViewPlans: _openPlans,
+        onRetry: () => _loadArticle(showLoading: true),
+      );
+    }
     final hasMultiple = article.versions.length > 1;
     final fontScale = context.watch<ReaderSettingsProvider>().fontScale;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          NestedScrollView(
-            headerSliverBuilder: (context, innerBoxIsScrolled) => [
-              SliverAppBar(
-                expandedHeight: article.imageUrl != null ? 240 : 0,
-                pinned: true,
-                forceElevated: innerBoxIsScrolled,
-                foregroundColor: article.imageUrl != null ? Colors.white : null,
-                actions: [
-                  IconButton(
-                    onPressed: _showTextSizeSheet,
-                    tooltip: 'Text size',
-                    icon: const Icon(Icons.text_fields_rounded),
-                  ),
-                  const SizedBox(width: 4),
-                ],
-                flexibleSpace: article.imageUrl != null
-                    ? FlexibleSpaceBar(
-                        background: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CachedNetworkImage(
-                              imageUrl: article.imageUrl!,
-                              fit: BoxFit.cover,
-                              errorWidget: (_, __, ___) => Container(
-                                color:
-                                    theme.colorScheme.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.image_not_supported_outlined,
-                                  size: 48,
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ),
-                            const DecoratedBox(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Color(0x66000000),
-                                    Colors.transparent,
-                                    Color(0x55087F74),
-                                  ],
-                                  stops: [0, 0.55, 1],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : null,
-                bottom: hasMultiple
-                    ? PreferredSize(
-                        preferredSize: const Size.fromHeight(52),
-                        child: _VersionTabBar(
-                          versions: article.versions,
-                          current: _currentVersion,
-                          labelFor: _tabLabel,
-                          onTap: (i) {
-                            setState(() => _currentVersion = i);
-                            _pageController.animateToPage(
-                              i,
-                              duration: const Duration(milliseconds: 300),
-                              curve: Curves.easeInOut,
-                            );
-                          },
-                          theme: theme,
-                        ),
-                      )
-                    : null,
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverAppBar(
+            expandedHeight: article.imageUrl != null ? 240 : 0,
+            pinned: true,
+            forceElevated: innerBoxIsScrolled,
+            foregroundColor: article.imageUrl != null ? Colors.white : null,
+            actions: [
+              IconButton(
+                onPressed: _showTextSizeSheet,
+                tooltip: 'Text size',
+                icon: const Icon(Icons.text_fields_rounded),
               ),
+              const SizedBox(width: 4),
             ],
-            body: PageView.builder(
-              controller: _pageController,
-              itemCount: article.versions.length,
-              onPageChanged: (i) => setState(() => _currentVersion = i),
-              itemBuilder: (context, i) {
-                final version = article.versions[i];
-                // Collect the two LLM rewrite IDs for voting
-                final llmVersions =
-                    article.versions.where((v) => !v.isOriginal).toList();
-                return _VersionBody(
-                  article: article,
-                  version: version,
-                  theme: theme,
-                  fontScale: fontScale,
-                  votedForId: _votedForId,
-                  isVoting: _isVoting,
-                  llmVersions: llmVersions,
-                  isAuthenticated: context.read<AuthProvider>().isAuthenticated,
-                  onVote: _vote,
-                );
-              },
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 28,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: _showFontFeedback ? 1 : 0,
-                duration: const Duration(milliseconds: 180),
-                child: Center(
-                  child: _FontSizeFeedback(
-                    percent: (fontScale * 100).round(),
-                  ),
-                ),
-              ),
-            ),
+            flexibleSpace: article.imageUrl != null
+                ? FlexibleSpaceBar(
+                    background: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: article.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => Container(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 48,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Color(0x66000000),
+                                Colors.transparent,
+                                Color(0x55087F74),
+                              ],
+                              stops: [0, 0.55, 1],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : null,
+            bottom: hasMultiple
+                ? PreferredSize(
+                    preferredSize: const Size.fromHeight(52),
+                    child: _VersionTabBar(
+                      versions: article.versions,
+                      current: _currentVersion,
+                      labelFor: _tabLabel,
+                      onTap: (i) {
+                        setState(() => _currentVersion = i);
+                        _pageController.animateToPage(
+                          i,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                        );
+                      },
+                      theme: theme,
+                    ),
+                  )
+                : null,
           ),
         ],
+        body: PageView.builder(
+          controller: _pageController,
+          itemCount: article.versions.length,
+          onPageChanged: (i) => setState(() => _currentVersion = i),
+          itemBuilder: (context, i) {
+            final version = article.versions[i];
+            // Collect the two LLM rewrite IDs for voting
+            final llmVersions =
+                article.versions.where((v) => !v.isOriginal).toList();
+            return _VersionBody(
+              article: article,
+              version: version,
+              theme: theme,
+              fontScale: fontScale,
+              votedForId: _votedForId,
+              isVoting: _isVoting,
+              llmVersions: llmVersions,
+              isAuthenticated: context.read<AuthProvider>().isAuthenticated,
+              onVote: _vote,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ArticleAccessScreen extends StatelessWidget {
+  final Article article;
+  final ApiException error;
+  final Future<void> Function() onViewPlans;
+  final VoidCallback onRetry;
+
+  const _ArticleAccessScreen({
+    required this.article,
+    required this.error,
+    required this.onViewPlans,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isPlanLimit = error.statusCode == 403 || error.statusCode == 429;
+
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(isPlanLimit ? 'Daily reading' : 'Story unavailable')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isPlanLimit
+                          ? const [Color(0xFFF2B134), Color(0xFFF06449)]
+                          : [
+                              theme.colorScheme.primaryContainer,
+                              theme.colorScheme.secondaryContainer,
+                            ],
+                    ),
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  child: Icon(
+                    isPlanLimit
+                        ? Icons.auto_stories_rounded
+                        : Icons.cloud_off_rounded,
+                    size: 40,
+                    color: isPlanLimit
+                        ? Colors.white
+                        : theme.colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  isPlanLimit
+                      ? 'Your ${article.category ?? 'news'} pick is set for today'
+                      : 'We couldn’t open this story',
+                  style: theme.textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  error.message,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+                if (isPlanLimit) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onViewPlans,
+                      icon: const Icon(Icons.all_inclusive_rounded),
+                      label: const Text('Read unlimited — \$14/month'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Secure monthly billing through Stripe. Cancel anytime.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ] else
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Try again'),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -511,40 +622,6 @@ TextStyle? _scaledStyle(TextStyle? style, double scale) {
   return style.copyWith(fontSize: (style.fontSize ?? 16) * scale);
 }
 
-class _FontSizeFeedback extends StatelessWidget {
-  final int percent;
-
-  const _FontSizeFeedback({required this.percent});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.inverseSurface,
-      borderRadius: BorderRadius.circular(22),
-      elevation: 8,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.text_fields_rounded,
-                size: 20, color: scheme.onInverseSurface),
-            const SizedBox(width: 8),
-            Text(
-              'Text size  $percent%',
-              style: TextStyle(
-                color: scheme.onInverseSurface,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _TextSizeSheet extends StatelessWidget {
   const _TextSizeSheet();
 
@@ -639,7 +716,7 @@ class _TextSizeSheet extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Tip: while reading, use the volume buttons to change text size.',
+                      'Tip: use the volume buttons while reading or scrolling the news to change text size.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSecondaryContainer,
                         fontWeight: FontWeight.w600,

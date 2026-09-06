@@ -122,9 +122,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var user models.User
 	var tierName *string
 	err := h.pool.QueryRow(r.Context(),
-		`SELECT u.id, u.email, u.hashed_password, u.name, u.created_at, st.name
+		`SELECT u.id, u.email, u.hashed_password, u.name, u.created_at,
+		        CASE WHEN st.unlimited_reading OR st.price_monthly > 0 THEN 'premium'
+		             ELSE COALESCE(st.name, 'free') END
 		 FROM users u
-		 LEFT JOIN user_subscriptions us ON us.user_id = u.id
+		 LEFT JOIN user_subscriptions us ON us.user_id = u.id AND us.status IN ('active', 'trialing')
 		 LEFT JOIN subscription_tiers st ON st.id = us.tier_id
 		 WHERE u.email = $1`, req.Email,
 	).Scan(&user.ID, &user.Email, &user.HashedPassword, &user.Name, &user.CreatedAt, &tierName)
@@ -167,7 +169,8 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	var tierName *string
 	h.pool.QueryRow(r.Context(),
 		`SELECT COALESCE(
-			(SELECT st.name FROM user_subscriptions us
+			(SELECT CASE WHEN st.unlimited_reading OR st.price_monthly > 0 THEN 'premium' ELSE st.name END
+			 FROM user_subscriptions us
 			 JOIN subscription_tiers st ON st.id = us.tier_id
 			 WHERE us.user_id = $1 AND us.status IN ('active', 'trialing')),
 			'free'

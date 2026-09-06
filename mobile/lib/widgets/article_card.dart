@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 
 import '../models/article.dart';
+import '../providers/reader_settings_provider.dart';
 
 class ArticleCard extends StatelessWidget {
   final Article article;
@@ -17,6 +19,7 @@ class ArticleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final fontScale = context.watch<ReaderSettingsProvider>().fontScale;
     final timeAgo = _timeAgo(article.publishedAt);
     final categories = article.categories.isNotEmpty
         ? article.categories
@@ -75,8 +78,7 @@ class ArticleCard extends StatelessWidget {
                                 child: Text(
                                   category,
                                   style: theme.textTheme.labelSmall?.copyWith(
-                                    color:
-                                        theme.colorScheme.onPrimaryContainer,
+                                    color: theme.colorScheme.onPrimaryContainer,
                                   ),
                                 ),
                               ),
@@ -111,7 +113,8 @@ class ArticleCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     article.title,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: _scaledStyle(theme.textTheme.titleMedium, fontScale)
+                        ?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                     maxLines: 3,
@@ -120,7 +123,8 @@ class ArticleCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   Text(
                     article.summary,
-                    style: theme.textTheme.bodyMedium?.copyWith(
+                    style: _scaledStyle(theme.textTheme.bodyMedium, fontScale)
+                        ?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                       height: 1.4,
                     ),
@@ -150,4 +154,9 @@ class ArticleCard extends StatelessWidget {
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     return DateFormat.MMMd().format(dateTime);
   }
+}
+
+TextStyle? _scaledStyle(TextStyle? style, double scale) {
+  if (style == null) return null;
+  return style.copyWith(fontSize: (style.fontSize ?? 16) * scale);
 }
