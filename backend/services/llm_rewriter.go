@@ -174,7 +174,7 @@ func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, 
 		return ArticleRewriteResult{}, errors.New("article rewriter API key and model are required")
 	}
 
-	prompt := fmt.Sprintf(`Rewrite this news article in clean markdown for No-Click Bait News and classify it.
+	prompt := fmt.Sprintf(`Rewrite this news article in clean markdown for NoClickBait News and classify it.
 
 Agent version: %d
 

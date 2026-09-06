@@ -1,4 +1,4 @@
-# No-Click Bait News
+# NoClickBait News
 
 A news reader app that delivers factual, no-clickbait news with an infinite scrolling UX.
 
@@ -123,8 +123,9 @@ flutter run
 - **Category filtering** (Technology, Science, Business, Health, Sports, World)
 - **Shimmer loading** placeholders for smooth UX
 - **User authentication** with JWT tokens
-- **Stripe subscriptions** with Free and Unlimited ($14/month) tiers
+- **Stripe subscriptions** with Free, 60 Reads ($9.99/month), and Unlimited ($14/month) tiers
 - **Free reading** of one selected article per category each day
+- **60 Reads plan** with 60 distinct standard articles per calendar month for $9.99/month
 - **Unlimited paid reading**, premium stories, and Stripe-hosted billing management
 - **Dark mode** support
 - **Material 3** design system

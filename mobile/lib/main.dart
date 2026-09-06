@@ -25,7 +25,7 @@ class NoClickBaitNewsApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ReaderSettingsProvider()),
       ],
       child: MaterialApp(
-        title: 'No-Click Bait News',
+        title: 'NoClickBait News',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),

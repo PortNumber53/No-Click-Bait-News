@@ -51,6 +51,8 @@ export function SubscriptionPage() {
     return <div className="sub__loading"><div className="spinner" /></div>;
   }
 
+  const hasCurrentPaid = tiers.some(tier => tier.is_current && tier.price_monthly > 0);
+
   return (
     <div className="sub">
       <div className="sub__header">
@@ -59,7 +61,7 @@ export function SubscriptionPage() {
       </div>
       {searchParams.get('success') === 'true' && (
         <p className="sub__notice sub__notice--success" role="status">
-          Checkout completed. Your Unlimited access will appear as soon as payment is confirmed.
+          Checkout completed. Your plan will appear as soon as payment is confirmed.
         </p>
       )}
       {searchParams.get('canceled') === 'true' && (
@@ -69,22 +71,24 @@ export function SubscriptionPage() {
       <div className="sub__grid">
         {tiers.map(tier => {
           const isPremium = tier.unlimited_reading;
+          const isMetered = tier.max_articles_per_month > 0;
           return (
             <div key={tier.id} className={`sub-card ${isPremium ? 'sub-card--featured' : ''} ${tier.is_current ? 'sub-card--current' : ''}`}>
               {isPremium && !tier.is_current && <span className="sub-card__badge">MOST POPULAR</span>}
               {tier.is_current && <span className="sub-card__badge sub-card__badge--current">YOUR PLAN</span>}
               <h2 className="sub-card__name">
-                {isPremium ? 'Unlimited' : 'Free'}
+                {isPremium ? 'Unlimited' : isMetered ? `${tier.max_articles_per_month} Reads` : 'Free'}
               </h2>
               <div className="sub-card__price">
                 <span className="sub-card__amount">${tier.price_monthly.toFixed(2)}</span>
                 <span className="sub-card__period">/month</span>
               </div>
               <ul className="sub-card__features">
-                <li>{isPremium ? 'Unlimited news reading' : '1 article per category, every day'}</li>
+                <li>{isPremium ? 'Unlimited news reading' : isMetered ? `${tier.max_articles_per_month} articles every month` : '1 article per category, every day'}</li>
                 {isPremium && <li>&#9733; Every category and premium story</li>}
+                {isMetered && <li>Read any standard story</li>}
               </ul>
-              {tier.is_current && isPremium ? (
+              {tier.is_current && tier.price_monthly > 0 ? (
                 <button
                   className="btn btn--outlined sub-card__btn"
                   onClick={manageBilling}
@@ -99,10 +103,10 @@ export function SubscriptionPage() {
               ) : tier.price_monthly > 0 ? (
                 <button
                   className="btn btn--filled sub-card__btn"
-                  onClick={() => subscribe(tier)}
-                  disabled={subscribing === tier.id}
+                  onClick={() => hasCurrentPaid ? manageBilling() : subscribe(tier)}
+                  disabled={subscribing === tier.id || isManaging}
                 >
-                  {subscribing === tier.id ? 'Opening checkout...' : 'Continue'}
+                  {hasCurrentPaid ? (isManaging ? 'Opening billing...' : 'Change plan') : subscribing === tier.id ? 'Opening checkout...' : 'Continue'}
                 </button>
               ) : (
                 <button className="btn btn--tonal sub-card__btn" disabled>

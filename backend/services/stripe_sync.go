@@ -87,7 +87,7 @@ func SyncSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool, stripeKey st
 
 // ensureProduct finds or creates a Stripe product for the given tier.
 func ensureProduct(tierID int, tierName string, existingProductID *string) (string, error) {
-	displayName := "No-Click Bait News — " + capitalize(tierName)
+	displayName := "NoClickBait News — " + capitalize(tierName)
 
 	// If we have an existing product ID, verify it still exists on Stripe
 	if existingProductID != nil && *existingProductID != "" {

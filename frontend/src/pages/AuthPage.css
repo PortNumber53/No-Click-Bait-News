@@ -14,9 +14,11 @@
   align-items: center;
 }
 
-.auth-form__icon {
-  font-size: 4rem;
-  margin-bottom: 8px;
+.auth-form__logo {
+  width: 88px;
+  height: 88px;
+  margin-bottom: 16px;
+  border-radius: 24px;
 }
 
 .auth-form__title {

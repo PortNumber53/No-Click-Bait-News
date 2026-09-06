@@ -49,7 +49,7 @@ def seed():
             summary=f"A straightforward summary of key {cat.lower()} developments without sensationalism.",
             content=f"Full article content for {cat.lower()} article #{i + 1}. "
             "This is a detailed, factual report without clickbait headlines.",
-            source_name="No-Click Bait News",
+            source_name="NoClickBait News",
             source_url=f"https://example.com/articles/{i + 1}",
             image_url=f"https://picsum.photos/seed/{i + 1}/800/400",
             category=cat,

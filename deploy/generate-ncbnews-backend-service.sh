@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a systemd unit file for the No-Click Bait News Go backend.
+# Generate a systemd unit file for the NoClickBait News Go backend.
 # Usage: generate-ncbnews-backend-service.sh <target-dir> <output-file>
 set -euo pipefail
 
@@ -8,7 +8,7 @@ OUTPUT="${2:?Usage: $0 <target-dir> <output-file>}"
 
 cat > "$OUTPUT" <<UNIT
 [Unit]
-Description=No-Click Bait News Backend
+Description=NoClickBait News Backend
 After=network.target postgresql.service
 
 [Service]

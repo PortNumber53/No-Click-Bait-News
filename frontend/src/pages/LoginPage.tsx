@@ -16,8 +16,8 @@ export function LoginPage() {
   return (
     <div className="auth-page">
       <form className="auth-form" onSubmit={handleSubmit}>
-        <div className="auth-form__icon">&#128240;</div>
-        <h1 className="auth-form__title">No-Click Bait News</h1>
+        <img className="auth-form__logo" src="/noclickbait-news-logo.png" alt="" />
+        <h1 className="auth-form__title">NoClickBait News</h1>
         <p className="auth-form__subtitle">Just the facts. No clickbait.</p>
 
         {error && <p className="auth-form__error">{error}</p>}

@@ -101,7 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openNewsTools() async {
     final theme = Theme.of(context);
     final tier = context.read<AuthProvider>().user?.subscriptionTier;
-    final isUnlimited = tier != null && tier != 'free';
+    final isUnlimited = tier == 'premium';
+    final isMetered = tier == 'standard';
     final action = await showModalBottomSheet<_NewsToolsAction>(
       context: context,
       isScrollControlled: true,
@@ -175,7 +176,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Text(
                         isUnlimited
                             ? 'Unlimited reading'
-                            : 'Free · 1 story per category today',
+                            : isMetered
+                                ? '60 reads each month'
+                                : 'Free · 1 story per category today',
                         style: theme.textTheme.labelLarge,
                       ),
                     ),
@@ -237,33 +240,25 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tier = context.watch<AuthProvider>().user?.subscriptionTier;
-    final isUnlimited = tier != null && tier != 'free';
+    final isUnlimited = tier == 'premium';
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF087F74), Color(0xFF20A58E)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: const Icon(
-                Icons.newspaper_rounded,
-                color: Colors.white,
-                size: 20,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Image.asset(
+                'assets/branding/noclickbait-news-logo.png',
+                width: 36,
+                height: 36,
+                fit: BoxFit.cover,
               ),
             ),
             const SizedBox(width: 10),
             const Text(
-              'No Clickbait',
+              'NoClickBait News',
               style: TextStyle(fontWeight: FontWeight.w800),
             ),
           ],

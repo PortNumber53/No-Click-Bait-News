@@ -111,12 +111,14 @@ var schemaDDL = []string{
 		stripe_price_id VARCHAR UNIQUE,
 		price_monthly NUMERIC(10,2) NOT NULL DEFAULT 0,
 		max_articles_per_day INTEGER NOT NULL DEFAULT 10,
+		max_articles_per_month INTEGER NOT NULL DEFAULT 0,
 		has_premium_access BOOLEAN NOT NULL DEFAULT false,
 		unlimited_reading BOOLEAN NOT NULL DEFAULT false,
 		is_active BOOLEAN NOT NULL DEFAULT true,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
 	`ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS unlimited_reading BOOLEAN NOT NULL DEFAULT false`,
+	`ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS max_articles_per_month INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE subscription_tiers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true`,
 
 	`CREATE TABLE IF NOT EXISTS user_subscriptions (
@@ -150,6 +152,15 @@ var schemaDDL = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS ix_user_category_daily_reads_article
 		ON user_category_daily_reads (user_id, article_id, read_date)`,
+	`CREATE TABLE IF NOT EXISTS user_monthly_article_reads (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		article_id UUID NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+		period_start DATE NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, article_id, period_start)
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_monthly_article_reads_usage
+		ON user_monthly_article_reads (user_id, period_start)`,
 	`CREATE TABLE IF NOT EXISTS user_url_fetches (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		source_url TEXT NOT NULL,
@@ -224,34 +235,37 @@ var schemaDDL = []string{
 
 func seedSubscriptionTiers(ctx context.Context, pool *pgxpool.Pool) error {
 	tiers := []struct {
-		Name              string
-		PriceMonthly      float64
-		MaxArticlesPerDay int
-		HasPremiumAccess  bool
-		UnlimitedReading  bool
+		Name                string
+		PriceMonthly        float64
+		MaxArticlesPerDay   int
+		MaxArticlesPerMonth int
+		HasPremiumAccess    bool
+		UnlimitedReading    bool
 	}{
-		{"free", 0, 1, false, false},
-		{"premium", 14, 0, true, true},
+		{"free", 0, 1, 0, false, false},
+		{"standard", 9.99, 0, 60, false, false},
+		{"premium", 14, 0, 0, true, true},
 	}
 
 	for _, t := range tiers {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO subscription_tiers (name, price_monthly, max_articles_per_day, has_premium_access, unlimited_reading, is_active)
-			 VALUES ($1, $2, $3, $4, $5, true)
+			`INSERT INTO subscription_tiers (name, price_monthly, max_articles_per_day, max_articles_per_month, has_premium_access, unlimited_reading, is_active)
+			 VALUES ($1, $2, $3, $4, $5, $6, true)
 			 ON CONFLICT (name) DO UPDATE SET
 			   price_monthly = EXCLUDED.price_monthly,
 			   max_articles_per_day = EXCLUDED.max_articles_per_day,
+			   max_articles_per_month = EXCLUDED.max_articles_per_month,
 			   has_premium_access = EXCLUDED.has_premium_access,
 			   unlimited_reading = EXCLUDED.unlimited_reading,
 			   is_active = true`,
-			t.Name, t.PriceMonthly, t.MaxArticlesPerDay, t.HasPremiumAccess, t.UnlimitedReading,
+			t.Name, t.PriceMonthly, t.MaxArticlesPerDay, t.MaxArticlesPerMonth, t.HasPremiumAccess, t.UnlimitedReading,
 		)
 		if err != nil {
 			return err
 		}
 	}
 	if _, err := pool.Exec(ctx,
-		"UPDATE subscription_tiers SET is_active = false WHERE name NOT IN ('free', 'premium')",
+		"UPDATE subscription_tiers SET is_active = false WHERE name NOT IN ('free', 'standard', 'premium')",
 	); err != nil {
 		return err
 	}
@@ -326,7 +340,7 @@ func seedSampleArticles(ctx context.Context, pool *pgxpool.Pool) error {
 			fmt.Sprintf("Sample %s Article #%d: Important Developments Today", cat, i+1),
 			fmt.Sprintf("A straightforward summary of key %s developments without sensationalism.", cat),
 			fmt.Sprintf("Full article content for %s article #%d. This is a detailed, factual report without clickbait headlines.", cat, i+1),
-			"No-Click Bait News",
+			"NoClickBait News",
 			fmt.Sprintf("https://example.com/articles/%d", i+1),
 			fmt.Sprintf("https://picsum.photos/seed/%d/800/400", i+1),
 			cat,

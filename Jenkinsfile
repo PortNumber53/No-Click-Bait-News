@@ -1,4 +1,4 @@
-// Declarative Pipeline for No-Click Bait News
+// Declarative Pipeline for NoClickBait News
 // Builds Go backend for amd64 + arm64, deploys amd64 to web1,
 // and deploys the Cloudflare Worker frontend.
 

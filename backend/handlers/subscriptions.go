@@ -22,28 +22,23 @@ import (
 )
 
 func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
-	// Legacy paid plans also receive Unlimited and are represented as the
-	// current paid plan even though they are no longer available for purchase.
-	currentIsPaid := false
+	currentTierID := 0
 	user := middleware.GetUser(r.Context())
 	if user != nil {
 		if err := h.pool.QueryRow(r.Context(),
-			`SELECT EXISTS(
-				SELECT 1 FROM user_subscriptions us
-				JOIN subscription_tiers st ON st.id = us.tier_id
-				WHERE us.user_id = $1
-				  AND us.status IN ('active', 'trialing')
-				  AND (st.unlimited_reading OR st.price_monthly > 0)
-			)`,
+			`SELECT COALESCE((
+				SELECT tier_id FROM user_subscriptions
+				WHERE user_id = $1 AND status IN ('active', 'trialing')
+			), 0)`,
 			user.ID,
-		).Scan(&currentIsPaid); err != nil {
+		).Scan(&currentTierID); err != nil {
 			Error(w, http.StatusInternalServerError, "Failed to check current plan")
 			return
 		}
 	}
 
 	rows, err := h.pool.Query(r.Context(),
-		`SELECT id, name, price_monthly, max_articles_per_day, has_premium_access, unlimited_reading
+		`SELECT id, name, price_monthly, max_articles_per_day, max_articles_per_month, has_premium_access, unlimited_reading
 		 FROM subscription_tiers WHERE is_active = true ORDER BY price_monthly`)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to fetch tiers")
@@ -54,10 +49,10 @@ func (h *Handler) GetTiers(w http.ResponseWriter, r *http.Request) {
 	tiers := make([]models.TierResponse, 0)
 	for rows.Next() {
 		var t models.TierResponse
-		if err := rows.Scan(&t.ID, &t.Name, &t.PriceMonthly, &t.MaxArticlesPerDay, &t.HasPremiumAccess, &t.UnlimitedReading); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.PriceMonthly, &t.MaxArticlesPerDay, &t.MaxArticlesPerMonth, &t.HasPremiumAccess, &t.UnlimitedReading); err != nil {
 			continue
 		}
-		t.IsCurrent = (currentIsPaid && t.UnlimitedReading) || (!currentIsPaid && t.Name == "free")
+		t.IsCurrent = t.ID == currentTierID || (currentTierID == 0 && t.Name == "free")
 		tiers = append(tiers, t)
 	}
 

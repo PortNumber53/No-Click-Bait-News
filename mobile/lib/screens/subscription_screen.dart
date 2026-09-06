@@ -55,17 +55,17 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
         final tiers = data
             .map((t) => SubscriptionTier.fromJson(t as Map<String, dynamic>))
             .toList();
-        final becameUnlimited =
-            tiers.any((tier) => tier.isCurrent && tier.unlimitedReading);
+        final becamePaid =
+            tiers.any((tier) => tier.isCurrent && tier.priceMonthly > 0);
         setState(() {
           _tiers = tiers;
           _isLoading = false;
           _error = null;
-          if (becameUnlimited) {
+          if (becamePaid) {
             _waitingForCheckout = false;
           }
         });
-        if (becameUnlimited) {
+        if (becamePaid) {
           await context.read<AuthProvider>().refreshUser();
         }
       }
@@ -241,6 +241,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
                         ),
                       ..._tiers.map((tier) => _TierCard(
                             tier: tier,
+                            hasCurrentPaid: _tiers.any((candidate) =>
+                                candidate.isCurrent &&
+                                candidate.priceMonthly > 0),
                             isSubscribing: _subscribingId == tier.id,
                             isOpeningPortal: _isOpeningPortal,
                             onSubscribe: () => _subscribe(tier),
@@ -255,6 +258,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen>
 
 class _TierCard extends StatelessWidget {
   final SubscriptionTier tier;
+  final bool hasCurrentPaid;
   final bool isSubscribing;
   final bool isOpeningPortal;
   final VoidCallback onSubscribe;
@@ -262,6 +266,7 @@ class _TierCard extends StatelessWidget {
 
   const _TierCard({
     required this.tier,
+    required this.hasCurrentPaid,
     required this.isSubscribing,
     required this.isOpeningPortal,
     required this.onSubscribe,
@@ -273,6 +278,7 @@ class _TierCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isPremium = tier.unlimitedReading;
     final isFree = tier.priceMonthly == 0;
+    final isMetered = tier.maxArticlesPerMonth > 0;
 
     final borderColor = tier.isCurrent
         ? theme.colorScheme.tertiary
@@ -312,7 +318,11 @@ class _TierCard extends StatelessWidget {
 
             // Name
             Text(
-              isPremium ? 'Unlimited' : 'Free',
+              isPremium
+                  ? 'Unlimited'
+                  : isMetered
+                      ? '${tier.maxArticlesPerMonth} Reads'
+                      : 'Free',
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -351,7 +361,9 @@ class _TierCard extends StatelessWidget {
               icon: Icons.article_outlined,
               label: tier.unlimitedReading
                   ? 'Unlimited news reading'
-                  : '1 article per category, every day',
+                  : isMetered
+                      ? '${tier.maxArticlesPerMonth} articles every month'
+                      : '1 article per category, every day',
             ),
             if (tier.unlimitedReading) ...[
               const _FeatureRow(
@@ -361,6 +373,15 @@ class _TierCard extends StatelessWidget {
               const _FeatureRow(
                 icon: Icons.link_rounded,
                 label: 'Unlimited submitted news links',
+              ),
+            ] else if (isMetered) ...[
+              const _FeatureRow(
+                icon: Icons.calendar_month_rounded,
+                label: 'Read any standard story',
+              ),
+              const _FeatureRow(
+                icon: Icons.refresh_rounded,
+                label: 'Allowance resets each month',
               ),
             ] else
               const _FeatureRow(
@@ -374,6 +395,7 @@ class _TierCard extends StatelessWidget {
               width: double.infinity,
               child: _ActionButton(
                 tier: tier,
+                hasCurrentPaid: hasCurrentPaid,
                 isSubscribing: isSubscribing,
                 isOpeningPortal: isOpeningPortal,
                 onSubscribe: onSubscribe,
@@ -453,6 +475,7 @@ class _FeatureRow extends StatelessWidget {
 
 class _ActionButton extends StatelessWidget {
   final SubscriptionTier tier;
+  final bool hasCurrentPaid;
   final bool isSubscribing;
   final bool isOpeningPortal;
   final VoidCallback onSubscribe;
@@ -460,6 +483,7 @@ class _ActionButton extends StatelessWidget {
 
   const _ActionButton({
     required this.tier,
+    required this.hasCurrentPaid,
     required this.isSubscribing,
     required this.isOpeningPortal,
     required this.onSubscribe,
@@ -469,7 +493,7 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (tier.isCurrent) {
-      if (tier.unlimitedReading) {
+      if (tier.priceMonthly > 0) {
         return OutlinedButton.icon(
           onPressed: isOpeningPortal ? null : onManageBilling,
           icon: isOpeningPortal
@@ -491,6 +515,13 @@ class _ActionButton extends StatelessWidget {
       return const FilledButton.tonal(
         onPressed: null,
         child: Text('Free'),
+      );
+    }
+    if (hasCurrentPaid) {
+      return OutlinedButton.icon(
+        onPressed: isOpeningPortal ? null : onManageBilling,
+        icon: const Icon(Icons.swap_horiz_rounded),
+        label: const Text('Change plan'),
       );
     }
     return FilledButton(

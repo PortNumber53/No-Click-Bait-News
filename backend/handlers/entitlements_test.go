@@ -23,3 +23,15 @@ func TestArticleReadCategory(t *testing.T) {
 		t.Fatalf("articleReadCategory() default = %q, want General", got)
 	}
 }
+
+func TestArticleReadLimitMessage(t *testing.T) {
+	monthly := readingEntitlement{MonthlyReadLimit: 60}
+	if got := articleReadLimitMessage(monthly, "Technology"); got != "Your plan includes 60 articles per month. Upgrade for unlimited reading." {
+		t.Fatalf("monthly limit message = %q", got)
+	}
+
+	free := readingEntitlement{}
+	if got := articleReadLimitMessage(free, "Technology"); got != "Your free plan includes one Technology article per day. Upgrade for more reading." {
+		t.Fatalf("free limit message = %q", got)
+	}
+}

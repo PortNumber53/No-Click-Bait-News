@@ -38,14 +38,15 @@ type Article struct {
 }
 
 type SubscriptionTier struct {
-	ID                int     `json:"id"`
-	Name              string  `json:"name"`
-	StripeProductID   *string `json:"-"`
-	StripePriceID     *string `json:"-"`
-	PriceMonthly      float64 `json:"price_monthly"`
-	MaxArticlesPerDay int     `json:"max_articles_per_day"`
-	HasPremiumAccess  bool    `json:"has_premium_access"`
-	UnlimitedReading  bool    `json:"unlimited_reading"`
+	ID                  int     `json:"id"`
+	Name                string  `json:"name"`
+	StripeProductID     *string `json:"-"`
+	StripePriceID       *string `json:"-"`
+	PriceMonthly        float64 `json:"price_monthly"`
+	MaxArticlesPerDay   int     `json:"max_articles_per_day"`
+	MaxArticlesPerMonth int     `json:"max_articles_per_month"`
+	HasPremiumAccess    bool    `json:"has_premium_access"`
+	UnlimitedReading    bool    `json:"unlimited_reading"`
 }
 
 type UserSubscription struct {
@@ -116,13 +117,14 @@ type FeedResponse struct {
 }
 
 type TierResponse struct {
-	ID                int     `json:"id"`
-	Name              string  `json:"name"`
-	PriceMonthly      float64 `json:"price_monthly"`
-	MaxArticlesPerDay int     `json:"max_articles_per_day"`
-	HasPremiumAccess  bool    `json:"has_premium_access"`
-	UnlimitedReading  bool    `json:"unlimited_reading"`
-	IsCurrent         bool    `json:"is_current"`
+	ID                  int     `json:"id"`
+	Name                string  `json:"name"`
+	PriceMonthly        float64 `json:"price_monthly"`
+	MaxArticlesPerDay   int     `json:"max_articles_per_day"`
+	MaxArticlesPerMonth int     `json:"max_articles_per_month"`
+	HasPremiumAccess    bool    `json:"has_premium_access"`
+	UnlimitedReading    bool    `json:"unlimited_reading"`
+	IsCurrent           bool    `json:"is_current"`
 }
 
 type CheckoutRequest struct {

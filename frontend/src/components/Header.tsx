@@ -33,7 +33,10 @@ export function Header() {
 
   return (
     <header className="header">
-      <Link to="/" className="header__title">No-Click Bait News</Link>
+      <Link to="/" className="header__title">
+        <img className="header__logo" src="/noclickbait-news-logo.png" alt="" />
+        <span>NoClickBait News</span>
+      </Link>
       {isAuthenticated && (
         <nav className="header__actions">
           <form className="header__url-form" onSubmit={handleFetchArticle}>

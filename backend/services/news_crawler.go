@@ -346,7 +346,7 @@ func fetchFeedArticles(ctx context.Context, feedURL string) ([]feedArticle, erro
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "No-Click-Bait-News/1.0")
+	req.Header.Set("User-Agent", "NoClickBaitNews/1.0")
 
 	resp, err := newsCrawlerHTTPClient.Do(req)
 	if err != nil {

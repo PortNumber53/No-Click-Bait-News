@@ -6,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import articles, auth, subscriptions
 
 app = FastAPI(
-    title="No-Click Bait News API",
-    description="Backend API for the No-Click Bait News mobile app",
+    title="NoClickBait News API",
+    description="Backend API for the NoClickBait News mobile app",
     version="1.0.0",
 )
 

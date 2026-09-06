@@ -17,7 +17,7 @@ export function RegisterPage() {
   return (
     <div className="auth-page">
       <form className="auth-form" onSubmit={handleSubmit}>
-        <div className="auth-form__icon">&#128240;</div>
+        <img className="auth-form__logo" src="/noclickbait-news-logo.png" alt="" />
         <h1 className="auth-form__title">Create Account</h1>
         <p className="auth-form__subtitle">Join for unbiased news.</p>
 

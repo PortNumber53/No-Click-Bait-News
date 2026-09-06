@@ -29,6 +29,7 @@ export interface SubscriptionTier {
   name: string;
   price_monthly: number;
   max_articles_per_day: number;
+  max_articles_per_month: number;
   has_premium_access: boolean;
   unlimited_reading: boolean;
   is_current: boolean;

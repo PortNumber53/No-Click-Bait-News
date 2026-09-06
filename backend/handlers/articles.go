@@ -131,17 +131,17 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	category := r.URL.Query().Get("category")
 
-	// Paid readers receive the complete feed, including premium stories.
-	hasUnlimited := false
+	// Premium access is independent from metered reading allowances.
+	hasPremiumAccess := false
 	user := middleware.GetUser(r.Context())
 	if user != nil {
-		var err error
-		hasUnlimited, err = h.hasUnlimitedReading(r.Context(), user.ID)
+		access, err := h.getReadingEntitlement(r.Context(), user.ID)
 		if err != nil {
 			log.Printf("[feed] entitlement lookup failed: %v", err)
 			Error(w, http.StatusInternalServerError, "Failed to check article access")
 			return
 		}
+		hasPremiumAccess = access.HasPremiumAccess
 	}
 
 	offset := (page - 1) * pageSize
@@ -150,7 +150,7 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argIdx := 1
 
-	if !hasUnlimited {
+	if !hasPremiumAccess {
 		query += " AND (is_premium = false OR is_premium IS NULL)"
 	}
 	if category != "" {
@@ -162,7 +162,7 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
 	args = append(args, pageSize+1, offset)
 
-	log.Printf("[feed] user=%v unlimited=%v query=%s args=%v", user != nil, hasUnlimited, query, args)
+	log.Printf("[feed] user=%v premium_access=%v query=%s args=%v", user != nil, hasPremiumAccess, query, args)
 
 	rows, err := h.pool.Query(r.Context(), query, args...)
 	if err != nil {
@@ -320,25 +320,24 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	unlimited, err := h.hasUnlimitedReading(r.Context(), user.ID)
+	access, err := h.getReadingEntitlement(r.Context(), user.ID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to check article access")
 		return
 	}
-	if a.IsPremium && !unlimited {
+	if a.IsPremium && !access.HasPremiumAccess {
 		Error(w, http.StatusForbidden, "This story is available with Unlimited")
 		return
 	}
 	readCategory := articleReadCategory(a.Category, a.Categories)
-	allowed, err := h.recordArticleRead(r.Context(), user.ID, articleID, readCategory, unlimited)
+	allowed, err := h.recordArticleRead(r.Context(), user.ID, articleID, readCategory, access)
 	if err != nil {
 		log.Printf("[articles.read] user_id=%s article_id=%s status=usage_failed error=%q", user.ID, articleID, err)
 		Error(w, http.StatusInternalServerError, "Failed to record article usage")
 		return
 	}
 	if !allowed {
-		Error(w, http.StatusTooManyRequests,
-			fmt.Sprintf("Your free plan includes one %s article per day. Upgrade for unlimited reading.", readCategory))
+		Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, readCategory))
 		return
 	}
 
@@ -387,7 +386,7 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusUnauthorized, "Not authenticated")
 		return
 	}
-	unlimited, err := h.hasUnlimitedReading(r.Context(), user.ID)
+	access, err := h.getReadingEntitlement(r.Context(), user.ID)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to check article access")
 		return
@@ -415,19 +414,18 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 	}
 	if found {
 		log.Printf("[articles.fetch] request_id=%s status=existing article_id=%s url=%q elapsed_ms=%d", requestID, existing.ID, sourceURL, time.Since(start).Milliseconds())
-		if existing.IsPremium && !unlimited {
+		if existing.IsPremium && !access.HasPremiumAccess {
 			Error(w, http.StatusForbidden, "This story is available with Unlimited")
 			return
 		}
 		readCategory := articleReadCategory(existing.Category, existing.Categories)
-		allowed, err := h.recordArticleRead(r.Context(), user.ID, existing.ID, readCategory, unlimited)
+		allowed, err := h.recordArticleRead(r.Context(), user.ID, existing.ID, readCategory, access)
 		if err != nil {
 			Error(w, http.StatusInternalServerError, "Failed to record article usage")
 			return
 		}
 		if !allowed {
-			Error(w, http.StatusTooManyRequests,
-				fmt.Sprintf("Your free plan includes one %s article per day. Upgrade for unlimited reading.", readCategory))
+			Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, readCategory))
 			return
 		}
 		if _, err := h.pool.Exec(r.Context(), "UPDATE articles SET submitted_by_user_id = COALESCE(submitted_by_user_id, $1) WHERE id = $2", user.ID, existing.ID); err != nil {
@@ -483,14 +481,13 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusInternalServerError, "Failed to save fetched article")
 		return
 	}
-	allowed, err = h.recordArticleRead(r.Context(), user.ID, article.ID, category, unlimited)
+	allowed, err = h.recordArticleRead(r.Context(), user.ID, article.ID, category, access)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to record article usage")
 		return
 	}
 	if !allowed {
-		Error(w, http.StatusTooManyRequests,
-			"Your free plan includes one Submitted article per day. Upgrade for unlimited reading.")
+		Error(w, http.StatusTooManyRequests, articleReadLimitMessage(access, category))
 		return
 	}
 

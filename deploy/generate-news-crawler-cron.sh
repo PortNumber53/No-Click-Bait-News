@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate an hourly cron definition for the No-Click Bait News crawler.
+# Generate an hourly cron definition for the NoClickBait News crawler.
 # Usage: generate-news-crawler-cron.sh <target-dir> <output-file>
 set -euo pipefail
 
