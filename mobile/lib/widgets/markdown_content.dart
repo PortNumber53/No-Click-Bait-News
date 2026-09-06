@@ -73,8 +73,8 @@ List<_MarkdownBlock> _parseBlocks(String markdown) {
 
     if (RegExp(r'^[-*+]\s+').hasMatch(line)) {
       final items = <String>[];
-      while (i < lines.length &&
-          RegExp(r'^[-*+]\s+').hasMatch(lines[i].trim())) {
+      while (
+          i < lines.length && RegExp(r'^[-*+]\s+').hasMatch(lines[i].trim())) {
         items.add(lines[i].trim().replaceFirst(RegExp(r'^[-*+]\s+'), ''));
         i++;
       }
@@ -123,7 +123,7 @@ class _MarkdownBlockView extends StatelessWidget {
 
     switch (block.type) {
       case 'heading':
-        final size = block.level <= 2 ? 18.0 : 16.0;
+        final size = (style.fontSize ?? 16) * (block.level <= 2 ? 1.25 : 1.1);
         return Padding(
           padding: const EdgeInsets.only(top: 12, bottom: 6),
           child: Text(
@@ -160,12 +160,14 @@ class _MarkdownBlockView extends StatelessWidget {
       case 'quote':
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.only(left: 12),
+          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
           decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(12),
             border: Border(
               left: BorderSide(
-                color: theme.colorScheme.outlineVariant,
-                width: 3,
+                color: theme.colorScheme.primary,
+                width: 4,
               ),
             ),
           ),

@@ -48,92 +48,107 @@ class _ArticleVersionCardState extends State<ArticleVersionCard> {
     final llmVersions = _llmVersions(article);
     final hasMultipleVersions = llmVersions.length >= 2;
     // Clamp in case versions list shrinks on rebuild
-    final safeIndex = llmVersions.isEmpty ? 0 : _llmIndex.clamp(0, llmVersions.length - 1);
+    final safeIndex =
+        llmVersions.isEmpty ? 0 : _llmIndex.clamp(0, llmVersions.length - 1);
     final activeVersion = llmVersions.isNotEmpty
         ? llmVersions[safeIndex]
         : (article.versions.isNotEmpty ? article.versions.first : null);
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,  // Ensure swipe gestures are captured
-      onTap: widget.onTap,
-      onHorizontalDragEnd: _onHorizontalDrag,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: theme.colorScheme.shadow.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+    return Semantics(
+      button: true,
+      label: 'Read ${activeVersion?.title ?? article.title}',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onHorizontalDragEnd: _onHorizontalDrag,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
             ),
-          ],
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (article.imageUrl != null)
-              AspectRatio(
-                aspectRatio: 16 / 9,
-                child: CachedNetworkImage(
-                  imageUrl: article.imageUrl!,
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    child: const Center(child: CircularProgressIndicator()),
-                  ),
-                  errorWidget: (_, __, ___) => Container(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    child: Icon(
-                      Icons.image_not_supported_outlined,
-                      size: 40,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+            boxShadow: [
+              BoxShadow(
+                color: theme.colorScheme.shadow.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 4,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF087F74), Color(0xFFF06449)],
                   ),
                 ),
               ),
-            if (activeVersion != null)
-              // Render all LLM versions offstage simultaneously so
-              // IntrinsicHeight always reserves the tallest version's space.
-              IntrinsicHeight(
-                child: Stack(
-                  children: [
-                    for (int i = 0; i < llmVersions.length; i++)
-                      Offstage(
-                        offstage: true,
-                        child: _VersionContent(
-                          article: article,
-                          version: llmVersions[i],
-                          versionLabel: _labelFor(i),
-                          theme: theme,
-                        ),
+              if (article.imageUrl != null)
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: CachedNetworkImage(
+                    imageUrl: article.imageUrl!,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
+                    errorWidget: (_, __, ___) => Container(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: Icon(
+                        Icons.image_not_supported_outlined,
+                        size: 40,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
-                    _VersionContent(
-                      article: article,
-                      version: activeVersion,
-                      versionLabel: llmVersions.isNotEmpty
-                          ? _labelFor(safeIndex)
-                          : null,
-                      theme: theme,
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            if (hasMultipleVersions)
-              _VersionIndicator(
-                count: llmVersions.length,
-                current: safeIndex,
-                theme: theme,
-              ),
-          ],
+              if (activeVersion != null)
+                // Render all LLM versions offstage simultaneously so
+                // IntrinsicHeight always reserves the tallest version's space.
+                IntrinsicHeight(
+                  child: Stack(
+                    children: [
+                      for (int i = 0; i < llmVersions.length; i++)
+                        Offstage(
+                          offstage: true,
+                          child: _VersionContent(
+                            article: article,
+                            version: llmVersions[i],
+                            versionLabel: _labelFor(i),
+                            theme: theme,
+                          ),
+                        ),
+                      _VersionContent(
+                        article: article,
+                        version: activeVersion,
+                        versionLabel: llmVersions.isNotEmpty
+                            ? _labelFor(safeIndex)
+                            : null,
+                        theme: theme,
+                      ),
+                    ],
+                  ),
+                ),
+              if (hasMultipleVersions)
+                _VersionIndicator(
+                  count: llmVersions.length,
+                  current: safeIndex,
+                  theme: theme,
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
-
 }
 
 class _VersionContent extends StatelessWidget {
@@ -151,6 +166,8 @@ class _VersionContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final categoryColor = _categoryColor(article.category);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       child: Column(
@@ -163,13 +180,13 @@ class _VersionContent extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
+                    color: categoryColor.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     article.category!,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onPrimaryContainer,
+                      color: categoryColor,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -182,7 +199,8 @@ class _VersionContent extends StatelessWidget {
               if (versionLabel != null) ...[
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.secondaryContainer,
                     borderRadius: BorderRadius.circular(20),
@@ -250,8 +268,22 @@ class _VersionContent extends StatelessWidget {
     if (diff.inDays < 30) return '${diff.inDays}d ago';
     return '${diff.inDays ~/ 30}mo ago';
   }
-}
 
+  Color _categoryColor(String? category) {
+    final color = switch (category?.toLowerCase()) {
+      'technology' => const Color(0xFF4776D0),
+      'science' => const Color(0xFF7756C7),
+      'business' => const Color(0xFF087F74),
+      'health' => const Color(0xFFD94E67),
+      'sports' => const Color(0xFFE0782F),
+      'world' => const Color(0xFF2F78A4),
+      _ => theme.colorScheme.primary,
+    };
+    return theme.brightness == Brightness.dark
+        ? Color.lerp(color, Colors.white, 0.28)!
+        : color;
+  }
+}
 
 class _VersionIndicator extends StatelessWidget {
   final int count;

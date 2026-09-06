@@ -23,24 +23,14 @@ class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   bool _isFetchingUrl = false;
 
-  static const _categories = [
-    null,
-    'Technology',
-    'Science',
-    'Business',
-    'Health',
-    'Sports',
-    'World',
-  ];
-
-  static const _categoryLabels = [
-    'All',
-    'Technology',
-    'Science',
-    'Business',
-    'Health',
-    'Sports',
-    'World',
+  static const _categoryFilters = [
+    _CategoryFilter(null, 'For you', Icons.auto_awesome_rounded),
+    _CategoryFilter('Technology', 'Tech', Icons.memory_rounded),
+    _CategoryFilter('Science', 'Science', Icons.science_rounded),
+    _CategoryFilter('Business', 'Business', Icons.trending_up_rounded),
+    _CategoryFilter('Health', 'Health', Icons.favorite_rounded),
+    _CategoryFilter('Sports', 'Sports', Icons.sports_basketball_rounded),
+    _CategoryFilter('World', 'World', Icons.public_rounded),
   ];
 
   @override
@@ -82,7 +72,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _urlController.clear();
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => ArticleDetailScreen(article: article)),
+        MaterialPageRoute(
+            builder: (_) => ArticleDetailScreen(article: article)),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -102,105 +93,203 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final userName = context.watch<AuthProvider>().user?.name.trim();
+    final firstName = userName == null || userName.isEmpty
+        ? 'reader'
+        : userName.split(RegExp(r'\s+')).first;
 
     return Scaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.newspaper_rounded,
-                color: theme.colorScheme.primary, size: 22),
-            const SizedBox(width: 8),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF087F74), Color(0xFF20A58E)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Icon(
+                Icons.newspaper_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
             const Text(
-              'No-Click Bait News',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              'No Clickbait',
+              style: TextStyle(fontWeight: FontWeight.w800),
             ),
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.link),
-            tooltip: 'My URLs',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const MyUrlsScreen()),
-              );
+          PopupMenuButton<_HomeAction>(
+            tooltip: 'Account and links',
+            icon: const Icon(Icons.account_circle_outlined),
+            onSelected: (action) {
+              switch (action) {
+                case _HomeAction.myUrls:
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const MyUrlsScreen()),
+                  );
+                  break;
+                case _HomeAction.plans:
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const SubscriptionScreen(),
+                    ),
+                  );
+                  break;
+                case _HomeAction.signOut:
+                  context.read<AuthProvider>().logout();
+                  break;
+              }
             },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: _HomeAction.myUrls,
+                child: ListTile(
+                  leading: Icon(Icons.link_rounded),
+                  title: Text('My submitted links'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: _HomeAction.plans,
+                child: ListTile(
+                  leading: Icon(Icons.workspace_premium_outlined),
+                  title: Text('Plans and access'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: _HomeAction.signOut,
+                child: ListTile(
+                  leading: Icon(Icons.logout_rounded),
+                  title: Text('Sign out'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.workspace_premium_outlined),
-            tooltip: 'Subscriptions',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded),
-            tooltip: 'Sign Out',
-            onPressed: () => context.read<AuthProvider>().logout(),
-          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Row(
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF17324D), Color(0xFF087F74)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x3017324D),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _urlController,
-                    enabled: !_isFetchingUrl,
-                    keyboardType: TextInputType.url,
-                    textInputAction: TextInputAction.go,
-                    onSubmitted: (_) => _fetchUrl(),
-                    decoration: const InputDecoration(
-                      hintText: 'Paste news URL',
-                      prefixIcon: Icon(Icons.add_link),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
+                Text(
+                  'Good to see you, $firstName',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: Colors.white,
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: 'Fetch URL',
-                  onPressed: _isFetchingUrl ? null : _fetchUrl,
-                  icon: _isFetchingUrl
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add),
+                const SizedBox(height: 4),
+                Text(
+                  'Clear reporting from across the web—without the bait.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: Colors.white.withValues(alpha: 0.82),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _urlController,
+                        enabled: !_isFetchingUrl,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.go,
+                        onSubmitted: (_) => _fetchUrl(),
+                        decoration: InputDecoration(
+                          hintText: 'Paste a news link',
+                          prefixIcon: const Icon(Icons.add_link_rounded),
+                          fillColor: Colors.white.withValues(alpha: 0.96),
+                          hintStyle: TextStyle(
+                            color:
+                                const Color(0xFF17324D).withValues(alpha: 0.62),
+                          ),
+                          prefixIconColor: const Color(0xFF087F74),
+                          isDense: true,
+                        ),
+                        style: const TextStyle(color: Color(0xFF17324D)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton.filled(
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFFF06449),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(50, 50),
+                      ),
+                      tooltip: 'Clean up this article',
+                      onPressed: _isFetchingUrl ? null : _fetchUrl,
+                      icon: _isFetchingUrl
+                          ? const SizedBox(
+                              width: 19,
+                              height: 19,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.arrow_forward_rounded),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          // Category filter chips
           Consumer<NewsProvider>(
             builder: (context, news, _) {
               return SizedBox(
-                height: 50,
+                height: 54,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  itemCount: _categories.length,
+                  itemCount: _categoryFilters.length,
                   itemBuilder: (context, index) {
-                    final isSelected =
-                        news.selectedCategory == _categories[index];
+                    final filter = _categoryFilters[index];
+                    final isSelected = news.selectedCategory == filter.value;
                     return Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: FilterChip(
-                        label: Text(_categoryLabels[index]),
+                        avatar: Icon(filter.icon, size: 17),
+                        label: Text(filter.label),
                         selected: isSelected,
+                        showCheckmark: false,
+                        selectedColor: theme.colorScheme.primaryContainer,
                         onSelected: (_) {
-                          news.setCategory(_categories[index]);
+                          news.setCategory(filter.value);
                         },
                       ),
                     );
@@ -209,7 +298,32 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          const Divider(height: 1),
+          Consumer<NewsProvider>(
+            builder: (context, news, _) => Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+              child: Row(
+                children: [
+                  Text(
+                    news.selectedCategory ?? 'Latest stories',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  Icon(
+                    Icons.swipe_rounded,
+                    size: 17,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Swipe to compare',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           // Article feed with infinite scroll
           Expanded(
             child: Consumer<NewsProvider>(
@@ -265,7 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onRefresh: _refresh,
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding: const EdgeInsets.only(top: 8, bottom: 24),
+                    padding: const EdgeInsets.only(top: 2, bottom: 24),
                     itemCount: news.articles.length + (news.hasMore ? 1 : 0),
                     itemBuilder: (context, index) {
                       if (index == news.articles.length) {
@@ -299,4 +413,14 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+enum _HomeAction { myUrls, plans, signOut }
+
+class _CategoryFilter {
+  final String? value;
+  final String label;
+  final IconData icon;
+
+  const _CategoryFilter(this.value, this.label, this.icon);
 }
