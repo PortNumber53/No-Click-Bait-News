@@ -17,38 +17,10 @@ pipeline {
     TARGET_HOST     = 'web1'
     TARGET_DIR      = '/var/www/vhosts/api-ncbnews.truvis.co'
     SERVICE_NAME    = 'api-ncbnews-backend'
+    RUNTIME_ENV_FILE = '/etc/ncbnews/backend.env'
     SSH_CREDENTIALS = 'brain-jenkins-private-key'
 
-    // Database
-    DATABASE_URL = credentials('prod-database-url-ncbnews')
-
-    // JWT / Auth
-    JWT_SECRET_KEY = credentials('prod-jwt-secret-ncbnews')
-
-    // Stripe
-    STRIPE_SECRET_KEY              = credentials('prod-stripe-secret-key-ncbnews')
-    STRIPE_WEBHOOK_SECRET_SNAPSHOT = credentials('prod-stripe-webhook-secret-snapshot-ncbnews')
-    STRIPE_WEBHOOK_SECRET_THIN     = credentials('prod-stripe-webhook-secret-thin-ncbnews')
-
-    // TinyFish content fetching
-    TINYFISH_API_KEY = credentials('prod-tinyfish-api-key')
-    NEWS_CRAWLER_LIMIT = '25'
-
-    // OpenAI-compatible article rewriting
-    LLM_API_KEY  = credentials('prod-llm-api-key')
-    LLM_BASE_URL = credentials('prod-llm-base-url')
-    LLM_MODEL    = credentials('prod-llm-model')
-    LLM_MODELS = 'nemotron-3-super-120b,auto'
-    LLM_REWRITE_WORKERS = '1'
-    LLM_REWRITE_TIMEOUT_SECONDS = '300'
-    LLM_REWRITE_STALE_ON_START_LIMIT = '100'
-    LLM_REWRITE_MAX_ATTEMPTS = '5'
-
-    // CORS
-    ALLOWED_ORIGINS        = credentials('prod-allowed-origins-ncbnews')
-    CHECKOUT_RETURN_ORIGIN = 'https://ncbnews.truvis.co'
-
-    // Cloudflare
+    // CI-only credentials used by Jenkins to publish the frontend Worker.
     CF_API_TOKEN          = credentials('cloudflare-api-token')
     CLOUDFLARE_ACCOUNT_ID = credentials('cloudflare-account-id')
 
@@ -152,18 +124,7 @@ pipeline {
       }
     }
 
-    stage('DB Migrate & Seed') {
-      steps {
-        unstash "bin-amd64"
-        sh label: 'Run migrations via Go binary', script: """
-          set -euo pipefail
-          chmod +x artifacts/api-ncbnews-backend-linux-amd64
-          artifacts/api-ncbnews-backend-linux-amd64 migrate
-        """
-      }
-    }
-
-    stage('Deploy (amd64 → web1)') {
+    stage('Deploy & Migrate (amd64 → web1)') {
       steps {
         unstash "bin-amd64"
         sshagent(credentials: [env.SSH_CREDENTIALS]) {
@@ -174,8 +135,9 @@ BIN_LOCAL="artifacts/api-ncbnews-backend-linux-amd64"
 # Upload binary to /tmp on target
 scp "$BIN_LOCAL" "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend"
 
-# Generate systemd unit file
-bash deploy/generate-ncbnews-backend-service.sh "$TARGET_DIR" api-ncbnews-backend.service
+# Generate systemd unit file. Runtime configuration is host-managed and is
+# deliberately never copied through Jenkins.
+bash deploy/generate-ncbnews-backend-service.sh "$TARGET_DIR" api-ncbnews-backend.service "$RUNTIME_ENV_FILE"
 
 # Generate the hourly news crawler cron definition.
 bash deploy/generate-news-crawler-cron.sh "$TARGET_DIR" ncbnews-news-crawler.cron
@@ -185,14 +147,16 @@ scp api-ncbnews-backend.service "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.
 scp deploy/run-news-crawler.sh "grimlock@$TARGET_HOST:/tmp/run-news-crawler.sh"
 scp ncbnews-news-crawler.cron "grimlock@$TARGET_HOST:/tmp/ncbnews-news-crawler.cron"
 
-# Generate a dotenv file without interpolating credentials into this Jenkins script.
-node -e 'const keys=["DATABASE_URL","JWT_SECRET_KEY","STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET_SNAPSHOT","TINYFISH_API_KEY","NEWS_CRAWLER_LIMIT","LLM_API_KEY","LLM_BASE_URL","LLM_MODEL","LLM_MODELS","LLM_REWRITE_WORKERS","LLM_REWRITE_TIMEOUT_SECONDS","LLM_REWRITE_STALE_ON_START_LIMIT","LLM_REWRITE_MAX_ATTEMPTS","STRIPE_WEBHOOK_SECRET_THIN","ALLOWED_ORIGINS","CHECKOUT_RETURN_ORIGIN"]; for (const key of keys) process.stdout.write(`${key}=${JSON.stringify(process.env[key] || "")}\n`); process.stdout.write("PORT=21011\n")' > /tmp/api-ncbnews-backend.env
-scp /tmp/api-ncbnews-backend.env "grimlock@$TARGET_HOST:/tmp/api-ncbnews-backend.env"
-rm -f /tmp/api-ncbnews-backend.env
-
-# Stop service, replace binary, restart, and roll back if health verification fails.
+# Migrate using the target host's protected environment, then replace the
+# binary and roll back if health verification fails.
 ssh "grimlock@$TARGET_HOST" "
   set -euo pipefail
+  test -r $RUNTIME_ENV_FILE
+  chmod 0755 /tmp/api-ncbnews-backend
+  set -a
+  source $RUNTIME_ENV_FILE
+  set +a
+  /tmp/api-ncbnews-backend migrate
   sudo systemctl stop $SERVICE_NAME 2>/dev/null || true
   sudo mkdir -p $TARGET_DIR $TARGET_DIR/logs
   sudo chown -R grimlock:grimlock $TARGET_DIR
@@ -200,10 +164,8 @@ ssh "grimlock@$TARGET_HOST" "
     cp $TARGET_DIR/api-ncbnews-backend $TARGET_DIR/api-ncbnews-backend.previous
   fi
   sudo mv /tmp/api-ncbnews-backend $TARGET_DIR/api-ncbnews-backend
-  sudo mv /tmp/api-ncbnews-backend.env $TARGET_DIR/.env
-  sudo chown grimlock:grimlock $TARGET_DIR/api-ncbnews-backend $TARGET_DIR/.env
+  sudo chown grimlock:grimlock $TARGET_DIR/api-ncbnews-backend
   sudo chmod 0755 $TARGET_DIR/api-ncbnews-backend
-  sudo chmod 0600 $TARGET_DIR/.env
   sudo mv /tmp/api-ncbnews-backend.service /etc/systemd/system/$SERVICE_NAME.service
   sudo mv /tmp/run-news-crawler.sh $TARGET_DIR/run-news-crawler.sh
   sudo chown grimlock:grimlock $TARGET_DIR/run-news-crawler.sh

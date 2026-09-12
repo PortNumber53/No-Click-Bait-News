@@ -36,6 +36,11 @@ go run . migrate
 go run .
 ```
 
+Production runtime secrets and configuration live in
+`/etc/ncbnews/backend.env` (`root:grimlock`, mode `0640`). Systemd, remote
+migrations, and the hourly crawler all read that file. Jenkins deploys binaries
+and service definitions but never receives or rewrites backend runtime secrets.
+
 ### Fetch Article Content
 
 Article detail requests automatically use TinyFish Fetch to populate `articles.content`

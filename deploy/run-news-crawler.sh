@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${APP_DIR}/.env"
+ENV_FILE="${NCBNEWS_ENV_FILE:-/etc/ncbnews/backend.env}"
 LOG_DIR="${APP_DIR}/logs"
 LOG_FILE="${LOG_DIR}/news-crawler.log"
 LOCK_FILE="${APP_DIR}/.news-crawler.lock"
