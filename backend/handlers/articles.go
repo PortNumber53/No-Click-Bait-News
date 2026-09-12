@@ -473,7 +473,7 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 	var article models.ArticleResponse
 	err = h.pool.QueryRow(r.Context(),
 		fmt.Sprintf(`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, is_premium, submitted_by_user_id)
-		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, $7, ARRAY[$7], $8, false, $9)
+		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, $7::text, ARRAY[$7::text], $8, false, $9)
 		 RETURNING id, title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, is_premium, view_count`, articleCategoriesSelect),
 		title, summary, originalContent, originalContent, sourceName, sourceURL, category, publishedAt, submittedBy,
 	).Scan(&article.ID, &article.Title, &article.Summary, &article.Content, &article.OriginalContent, &article.RewriteStatus, &article.LLMRewriteVersion, &article.SourceName, &article.SourceURL,
