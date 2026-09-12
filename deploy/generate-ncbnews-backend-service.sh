@@ -10,7 +10,8 @@ ENVIRONMENT_FILE="${3:-/etc/ncbnews/backend.env}"
 cat > "$OUTPUT" <<UNIT
 [Unit]
 Description=NoClickBait News Backend
-After=network.target postgresql.service
+Wants=network-online.target tailscaled.service
+After=network-online.target postgresql.service tailscaled.service
 
 [Service]
 Type=simple
