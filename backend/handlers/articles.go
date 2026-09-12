@@ -851,7 +851,7 @@ func parseTinyFishPublishedDate(raw *string) time.Time {
 	}
 	for _, layout := range layouts {
 		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed.UTC()
+			return services.ClampPublishedAt(parsed)
 		}
 	}
 	return time.Now().UTC()

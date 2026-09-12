@@ -102,6 +102,9 @@ var schemaDDL = []string{
 	`UPDATE articles
 	 SET categories = ARRAY[category]
 	 WHERE categories IS NULL AND category IS NOT NULL AND category <> ''`,
+	`UPDATE articles
+	 SET published_at = NOW()
+	 WHERE published_at > NOW()`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_category ON articles (category)`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_categories ON articles USING GIN (categories)`,
 	`CREATE INDEX IF NOT EXISTS ix_articles_published_at ON articles (published_at)`,

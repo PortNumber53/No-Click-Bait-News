@@ -302,13 +302,13 @@ func crawlFetchContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFi
 	}
 	publishedAt := time.Now().UTC()
 	if article.PublishedAt != nil {
-		publishedAt = *article.PublishedAt
+		publishedAt = ClampPublishedAt(*article.PublishedAt)
 	}
 
 	var articleID uuid.UUID
 	err = pool.QueryRow(ctx,
 		`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, is_premium)
-		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, 'Crawled', ARRAY['Crawled'], $7, false)
+		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, 'Crawled', ARRAY['Crawled'], LEAST($7, NOW()), false)
 		 RETURNING id`,
 		truncateText(title, 240),
 		truncateText(summary, 500),
@@ -416,7 +416,7 @@ func parseFeedTime(raw string) *time.Time {
 	}
 	for _, layout := range []string{time.RFC1123Z, time.RFC1123, time.RFC3339, "Mon, 02 Jan 2006 15:04:05 MST"} {
 		if parsed, err := time.Parse(layout, value); err == nil {
-			utc := parsed.UTC()
+			utc := ClampPublishedAt(parsed)
 			return &utc
 		}
 	}

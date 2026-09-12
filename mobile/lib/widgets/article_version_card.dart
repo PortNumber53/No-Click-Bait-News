@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/article.dart';
 import '../providers/reader_settings_provider.dart';
+import '../utils/time_ago.dart';
 
 class ArticleVersionCard extends StatefulWidget {
   final Article article;
@@ -257,7 +258,7 @@ class _VersionContent extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                _timeAgo(article.publishedAt),
+                formatTimeAgo(article.publishedAt),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -267,15 +268,6 @@ class _VersionContent extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _timeAgo(DateTime dateTime) {
-    final diff = DateTime.now().difference(dateTime);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    if (diff.inDays < 30) return '${diff.inDays}d ago';
-    return '${diff.inDays ~/ 30}mo ago';
   }
 
   Color _categoryColor(String? category) {

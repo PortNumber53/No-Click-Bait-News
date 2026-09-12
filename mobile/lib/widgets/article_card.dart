@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/article.dart';
 import '../providers/reader_settings_provider.dart';
+import '../utils/time_ago.dart';
 
 class ArticleCard extends StatelessWidget {
   final Article article;
@@ -20,7 +20,10 @@ class ArticleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final fontScale = context.watch<ReaderSettingsProvider>().fontScale;
-    final timeAgo = _timeAgo(article.publishedAt);
+    final timeAgo = formatTimeAgo(
+      article.publishedAt,
+      useCalendarDateAfterWeek: true,
+    );
     final categories = article.categories.isNotEmpty
         ? article.categories
         : article.category != null
@@ -145,14 +148,6 @@ class ArticleCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _timeAgo(DateTime dateTime) {
-    final diff = DateTime.now().difference(dateTime);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return DateFormat.MMMd().format(dateTime);
   }
 }
 
