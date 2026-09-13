@@ -215,7 +215,8 @@ func (h *Handler) sendVoteStats(w http.ResponseWriter, r *http.Request, articleI
 
 func (h *Handler) loadCompletedRewrites(ctx context.Context, articleID uuid.UUID) ([]models.RewriteVersion, error) {
 	rows, err := h.pool.Query(ctx,
-		`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+		`SELECT ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content,
+		        ar.bias_label, ar.bias_reasoning IS NOT NULL
 		 FROM article_rewrites ar
 		 JOIN llm_models lm ON lm.id = ar.llm_model_id
 		 WHERE ar.article_id = $1 AND ar.processing_status = 'completed'
@@ -227,7 +228,8 @@ func (h *Handler) loadCompletedRewrites(ctx context.Context, articleID uuid.UUID
 	rewrites := make([]models.RewriteVersion, 0)
 	for rows.Next() {
 		var rv models.RewriteVersion
-		if err := rows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
+		if err := rows.Scan(&rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content,
+			&rv.BiasLabel, &rv.BiasReasoningAvailable); err != nil {
 			return nil, err
 		}
 		rewrites = append(rewrites, rv)

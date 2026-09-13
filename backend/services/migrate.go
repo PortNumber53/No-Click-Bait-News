@@ -225,6 +225,17 @@ var schemaDDL = []string{
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 		UNIQUE(article_id, llm_model_id)
 	)`,
+	`ALTER TABLE article_rewrites ADD COLUMN IF NOT EXISTS bias_label VARCHAR`,
+	`ALTER TABLE article_rewrites ADD COLUMN IF NOT EXISTS bias_reasoning TEXT`,
+	`CREATE TABLE IF NOT EXISTS user_bias_reasoning_reads (
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		rewrite_id UUID NOT NULL REFERENCES article_rewrites(id) ON DELETE CASCADE,
+		read_date DATE NOT NULL DEFAULT CURRENT_DATE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (user_id, rewrite_id, read_date)
+	)`,
+	`CREATE INDEX IF NOT EXISTS ix_user_bias_reasoning_reads_user_date
+		ON user_bias_reasoning_reads (user_id, read_date)`,
 
 	`CREATE TABLE IF NOT EXISTS rewrite_votes (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -54,6 +54,18 @@ export interface RewriteVersion {
   title: string;
   summary: string;
   content?: string;
+  bias_label?: string;
+  bias_reasoning?: string;
+  bias_reasoning_available: boolean;
+  bias_reasoning_unlocked: boolean;
+}
+
+export interface BiasReasoningResponse {
+  article_id: string;
+  rewrite_id: string;
+  bias_label: string;
+  bias_reasoning: string;
+  remaining_today?: number;
 }
 
 export interface ComparisonData {

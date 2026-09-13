@@ -108,6 +108,25 @@ class ApiService {
     );
   }
 
+  static Future<Map<String, dynamic>> revealBiasReasoning({
+    required String articleId,
+    required String rewriteId,
+  }) async {
+    final response = await http.post(
+      Uri.parse(
+        '$baseUrl/articles/$articleId/rewrites/$rewriteId/bias-reasoning',
+      ),
+      headers: await _headers(auth: true),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw ApiException(
+      response.statusCode,
+      _responseError(response, 'Failed to open bias explanation'),
+    );
+  }
+
   static Future<Map<String, dynamic>> fetchArticleUrl(String url) async {
     final response = await http.post(
       Uri.parse('$baseUrl/articles/fetch'),

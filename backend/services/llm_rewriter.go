@@ -21,7 +21,7 @@ const (
 	defaultLLMTemperature      = 0.2
 	defaultLLMMaxTokens        = 3000
 	defaultLLMHTTPTimeout      = 5 * time.Minute
-	ArticleRewriteAgentVersion = 2
+	ArticleRewriteAgentVersion = 3
 )
 
 type ArticleRewriter struct {
@@ -34,10 +34,12 @@ type ArticleRewriter struct {
 }
 
 type ArticleRewriteResult struct {
-	Content    string   `json:"content"`
-	Categories []string `json:"categories"`
-	Title      string   `json:"title,omitempty"`
-	Summary    string   `json:"summary,omitempty"`
+	Content       string   `json:"content"`
+	Categories    []string `json:"categories"`
+	Title         string   `json:"title,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	BiasLabel     string   `json:"bias_label"`
+	BiasReasoning string   `json:"bias_reasoning"`
 }
 
 type chatCompletionRequest struct {
@@ -189,6 +191,9 @@ Rules:
 - Do not add facts, claims, opinions, analysis, or context that is not in the original.
 - Assign 1 to 3 categories that best fit the article.
 - Categories must come from this exact list: %s.
+- Assess bias in the original article, not in your rewrite. Use specific textual evidence and do not infer the author's private intent.
+- bias_label must be exactly one of: No clear bias, Left-leaning, Right-leaning, Mixed political framing, Loaded or sensational framing, Source imbalance, Promotional or advocacy framing, Unclear.
+- bias_reasoning must be a neutral 2-4 sentence explanation of the evidence for the label. If there is not enough evidence, use Unclear and explain what is missing.
 - Return only valid JSON. Do not wrap it in markdown fences.
 
 JSON shape:
@@ -196,7 +201,9 @@ JSON shape:
 	"title": "direct factual headline",
 	"summary": "2-4 sentence factual summary",
   "content": "rewritten article markdown",
-  "categories": ["Business", "Technology"]
+  "categories": ["Business", "Technology"],
+  "bias_label": "No clear bias",
+  "bias_reasoning": "The article attributes its factual claims and avoids loaded wording. It presents no clear political or promotional framing."
 }
 
 Title: %s
@@ -276,6 +283,8 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 	result.Content = stripHTMLMarkup(result.Content)
 	result.Title = strings.Join(strings.Fields(stripHTMLMarkup(result.Title)), " ")
 	result.Summary = strings.Join(strings.Fields(stripHTMLMarkup(result.Summary)), " ")
+	result.BiasLabel = normalizeBiasLabel(result.BiasLabel)
+	result.BiasReasoning = strings.Join(strings.Fields(stripHTMLMarkup(result.BiasReasoning)), " ")
 	if result.Content == "" {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite content was empty")
 	}
@@ -283,6 +292,32 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 	if len(result.Categories) == 0 {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite did not include valid categories")
 	}
+	if result.BiasLabel == "" {
+		return ArticleRewriteResult{}, errors.New("LLM rewrite did not include a valid bias label")
+	}
+	if result.BiasReasoning == "" {
+		return ArticleRewriteResult{}, errors.New("LLM rewrite did not include bias reasoning")
+	}
 
 	return result, nil
+}
+
+func normalizeBiasLabel(value string) string {
+	labels := []string{
+		"No clear bias",
+		"Left-leaning",
+		"Right-leaning",
+		"Mixed political framing",
+		"Loaded or sensational framing",
+		"Source imbalance",
+		"Promotional or advocacy framing",
+		"Unclear",
+	}
+	value = strings.TrimSpace(value)
+	for _, label := range labels {
+		if strings.EqualFold(value, label) {
+			return label
+		}
+	}
+	return ""
 }

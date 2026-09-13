@@ -132,6 +132,7 @@ flutter run
 - **Free reading** of one selected article per category each day
 - **60 Reads plan** with 60 standard article grants per calendar month for $9.99/month
 - **Unlimited paid reading**, premium stories, and Stripe-hosted billing management
+- **AI bias checks** with labels visible to everyone, explanations included with paid plans, and five explanation unlocks per day on Free
 - **Instant reopening** from a user-scoped local cache for active seven-day article grants
 - **Dark mode** support
 - **Material 3** design system
@@ -149,6 +150,7 @@ cleanup removes expired grants and older quota rows.
 | POST | `/api/v1/auth/login` | Login |
 | GET | `/api/v1/articles/feed` | Paginated article feed |
 | GET | `/api/v1/articles/{id}` | Single article detail |
+| POST | `/api/v1/articles/{id}/rewrites/{rewriteId}/bias-reasoning` | Unlock an AI bias explanation |
 | POST | `/api/v1/articles/fetch` | Fetch and rewrite a submitted URL |
 | GET | `/api/v1/articles/{id}/comparison` | Blind rewrite comparison |
 | POST | `/api/v1/articles/{id}/vote` | Vote on the presented rewrite pair |

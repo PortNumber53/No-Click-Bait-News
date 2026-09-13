@@ -1,4 +1,4 @@
-import type { Article, ArticleFeed, AuthResponse, ComparisonData, SubscriptionTier, User, VoteStats } from '../types';
+import type { Article, ArticleFeed, AuthResponse, BiasReasoningResponse, ComparisonData, SubscriptionTier, User, VoteStats } from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -87,6 +87,13 @@ export const api = {
     return request<Article>(
       `${API_BASE}/articles/${id}`,
       { headers: headers(true) },
+    );
+  },
+
+  revealBiasReasoning(articleId: string, rewriteId: string) {
+    return request<BiasReasoningResponse>(
+      `${API_BASE}/articles/${articleId}/rewrites/${rewriteId}/bias-reasoning`,
+      { method: 'POST', headers: headers(true) },
     );
   },
 

@@ -77,6 +77,45 @@ class ArticleAccessCache {
     await _prune(preferences);
   }
 
+  static Future<void> updateBiasReasoning({
+    required String userId,
+    required String articleId,
+    required String rewriteId,
+    required String biasLabel,
+    required String biasReasoning,
+  }) async {
+    final key = _key(userId, articleId);
+    if (_memory[key] == null) {
+      await get(userId, articleId);
+    }
+    final current = _memory[key];
+    if (current == null) return;
+
+    final payload = Map<String, dynamic>.from(current.articleJson);
+    final versionsKey = payload['rewrites'] is List ? 'rewrites' : 'versions';
+    final versions = payload[versionsKey] as List?;
+    if (versions == null) return;
+    payload[versionsKey] = versions.map((value) {
+      final version = Map<String, dynamic>.from(value as Map);
+      if ((version['id'] ?? version['rewrite_id']) == rewriteId) {
+        version['bias_label'] = biasLabel;
+        version['bias_reasoning'] = biasReasoning;
+        version['bias_reasoning_available'] = true;
+        version['bias_reasoning_unlocked'] = true;
+      }
+      return version;
+    }).toList();
+
+    final updated = _CachedArticle(
+      article: Article.fromJson(payload),
+      articleJson: payload,
+      expiresAt: current.expiresAt,
+    );
+    _memory[key] = updated;
+    final preferences = await _prefs();
+    await preferences.setString(key, updated.encode());
+  }
+
   /// Preloads one user's small, bounded grant set while their session starts,
   /// making subsequent reopens synchronous.
   static Future<void> warm(String userId) async {

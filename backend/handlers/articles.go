@@ -190,7 +190,7 @@ func (h *Handler) GetFeed(w http.ResponseWriter, r *http.Request) {
 		articles = articles[:pageSize]
 	}
 
-	h.attachArticleRewrites(r.Context(), articles, false)
+	h.attachArticleRewrites(r.Context(), articles, false, false, nil)
 
 	JSON(w, http.StatusOK, models.FeedResponse{
 		Articles: articles,
@@ -249,7 +249,7 @@ func (h *Handler) GetMyArticles(w http.ResponseWriter, r *http.Request) {
 		articles = articles[:pageSize]
 	}
 
-	h.attachArticleRewrites(r.Context(), articles, false)
+	h.attachArticleRewrites(r.Context(), articles, false, false, nil)
 
 	JSON(w, http.StatusOK, models.FeedResponse{
 		Articles: articles,
@@ -259,7 +259,7 @@ func (h *Handler) GetMyArticles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.ArticleResponse, includeContent bool) {
+func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.ArticleResponse, includeContent, includeAllBiasReasoning bool, biasUserID *uuid.UUID) {
 	if len(articles) == 0 {
 		return
 	}
@@ -269,12 +269,30 @@ func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.A
 		ids[i] = articles[i].ID
 		indexByID[articles[i].ID] = i
 	}
+	var biasUser any
+	if biasUserID != nil {
+		biasUser = *biasUserID
+	}
 	rows, err := h.pool.Query(ctx,
-		`SELECT ar.article_id, ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content
+		`SELECT ar.article_id, ar.id, lm.display_name, ar.rewritten_title, ar.rewritten_summary, ar.rewritten_content,
+		        ar.bias_label,
+		        CASE WHEN $2::boolean OR (
+		          $3::uuid IS NOT NULL AND EXISTS (
+		            SELECT 1 FROM user_bias_reasoning_reads ubrr
+		            WHERE ubrr.user_id = $3::uuid AND ubrr.rewrite_id = ar.id AND ubrr.read_date = CURRENT_DATE
+		          )
+		        ) THEN ar.bias_reasoning END,
+		        ar.bias_reasoning IS NOT NULL,
+		        ar.bias_reasoning IS NOT NULL AND ($2::boolean OR (
+		          $3::uuid IS NOT NULL AND EXISTS (
+		            SELECT 1 FROM user_bias_reasoning_reads ubrr
+		            WHERE ubrr.user_id = $3::uuid AND ubrr.rewrite_id = ar.id AND ubrr.read_date = CURRENT_DATE
+		          )
+		        ))
 		 FROM article_rewrites ar
 		 JOIN llm_models lm ON lm.id = ar.llm_model_id
 		 WHERE ar.article_id = ANY($1::uuid[]) AND ar.processing_status = 'completed'
-		 ORDER BY ar.article_id, ar.llm_model_id`, ids)
+		 ORDER BY ar.article_id, ar.llm_model_id`, ids, includeAllBiasReasoning, biasUser)
 	if err != nil {
 		log.Printf("[articles.rewrites] status=query_failed error=%q", err)
 		return
@@ -283,7 +301,8 @@ func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.A
 	for rows.Next() {
 		var articleID uuid.UUID
 		var rv models.RewriteVersion
-		if err := rows.Scan(&articleID, &rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content); err != nil {
+		if err := rows.Scan(&articleID, &rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content,
+			&rv.BiasLabel, &rv.BiasReasoning, &rv.BiasReasoningAvailable, &rv.BiasReasoningUnlocked); err != nil {
 			log.Printf("[articles.rewrites] status=scan_failed error=%q", err)
 			continue
 		}
@@ -366,7 +385,7 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	h.pool.Exec(r.Context(), "UPDATE articles SET view_count = view_count + 1 WHERE id = $1", articleID)
 
 	articles := []models.ArticleResponse{a}
-	h.attachArticleRewrites(r.Context(), articles, true)
+	h.attachArticleRewrites(r.Context(), articles, true, isPaidTier(access), &user.ID)
 	a = articles[0]
 
 	JSON(w, http.StatusOK, a)
@@ -683,14 +702,16 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO article_rewrites
-			 (article_id, llm_model_id, rewritten_title, rewritten_summary, rewritten_content, processing_status)
-			 VALUES ($1, $2, $3, $4, $5, 'completed')
+			 (article_id, llm_model_id, rewritten_title, rewritten_summary, rewritten_content, bias_label, bias_reasoning, processing_status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed')
 			 ON CONFLICT (article_id, llm_model_id) DO UPDATE SET
 			 rewritten_title = EXCLUDED.rewritten_title,
 			 rewritten_summary = EXCLUDED.rewritten_summary,
 			 rewritten_content = EXCLUDED.rewritten_content,
+			 bias_label = EXCLUDED.bias_label,
+			 bias_reasoning = EXCLUDED.bias_reasoning,
 			 processing_status = 'completed', error_message = NULL`,
-			job.ArticleID, modelID, item.Result.Title, item.Result.Summary, item.Result.Content,
+			job.ArticleID, modelID, item.Result.Title, item.Result.Summary, item.Result.Content, item.Result.BiasLabel, item.Result.BiasReasoning,
 		); err != nil {
 			_ = tx.Rollback(ctx)
 			h.failArticleRewriteJob(job, err)

@@ -47,6 +47,19 @@
   color: var(--on-surface-variant);
 }
 
+.article-card__bias {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 /* 3-column layout for articles with rewrites */
 .article-card__columns {
   display: grid;

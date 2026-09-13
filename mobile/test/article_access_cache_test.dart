@@ -49,4 +49,35 @@ void main() {
 
     expect(await ArticleAccessCache.get('user-1', 'article-1'), isNull);
   });
+
+  test('unlocked bias reasoning survives memory reset', () async {
+    final payload = articleJson(
+      expiresAt: DateTime.now().toUtc().add(const Duration(days: 7)),
+    );
+    payload['rewrites'] = [
+      {
+        'id': 'rewrite-1',
+        'model_name': 'Model A',
+        'title': 'Rewrite',
+        'summary': 'Summary',
+        'bias_label': 'Source imbalance',
+        'bias_reasoning_available': true,
+        'bias_reasoning_unlocked': false,
+      },
+    ];
+    await ArticleAccessCache.put('user-1', payload);
+
+    await ArticleAccessCache.updateBiasReasoning(
+      userId: 'user-1',
+      articleId: 'article-1',
+      rewriteId: 'rewrite-1',
+      biasLabel: 'Source imbalance',
+      biasReasoning: 'Only one side is quoted.',
+    );
+    ArticleAccessCache.resetForTesting();
+
+    final restored = await ArticleAccessCache.get('user-1', 'article-1');
+    expect(restored?.versions.last.biasReasoningUnlocked, isTrue);
+    expect(restored?.versions.last.biasReasoning, 'Only one side is quoted.');
+  });
 }

@@ -41,3 +41,15 @@ func TestArticleAccessRetention(t *testing.T) {
 		t.Fatalf("article access retention = %d days, want 7", articleAccessRetentionDays)
 	}
 }
+
+func TestBiasReasoningEntitlement(t *testing.T) {
+	if freeBiasReasoningsPerDay != 5 {
+		t.Fatalf("free bias reasonings = %d, want 5", freeBiasReasoningsPerDay)
+	}
+	if isPaidTier(readingEntitlement{TierName: "free"}) {
+		t.Fatal("free tier was treated as paid")
+	}
+	if !isPaidTier(readingEntitlement{TierName: "standard"}) || !isPaidTier(readingEntitlement{TierName: "premium"}) {
+		t.Fatal("paid tier was not granted unlimited bias reasoning")
+	}
+}

@@ -225,6 +225,7 @@ func runServer() {
 			r.Use(auth.RequireUser)
 			r.Get("/articles/my", h.GetMyArticles)
 			r.Post("/articles/fetch", h.FetchArticle)
+			r.Post("/articles/{articleID}/rewrites/{rewriteID}/bias-reasoning", h.RevealBiasReasoning)
 		})
 
 		r.Group(func(r chi.Router) {

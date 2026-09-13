@@ -44,7 +44,7 @@ func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 			"choices": [{
 				"message": {
 					"role": "assistant",
-					"content": "{\"content\":\"# Direct headline\\n\\nConcise rewritten content.\",\"categories\":[\"Business\",\"Technology\",\"Opinion\"]}"
+					"content": "{\"content\":\"# Direct headline\\n\\nConcise rewritten content.\",\"categories\":[\"Business\",\"Technology\",\"Opinion\"],\"bias_label\":\"No clear bias\",\"bias_reasoning\":\"The article uses attributed factual language.\"}"
 				}
 			}]
 		}`))
@@ -65,7 +65,7 @@ func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 }
 
 func TestParseArticleRewriteResultStripsMarkdownFenceAndNormalizesCategories(t *testing.T) {
-	rewrite, err := parseArticleRewriteResult("```json\n{\"content\":\"Body\",\"categories\":[\" technology \",\"TECHNOLOGY\",\"World\"]}\n```")
+	rewrite, err := parseArticleRewriteResult("```json\n{\"content\":\"Body\",\"categories\":[\" technology \",\"TECHNOLOGY\",\"World\"],\"bias_label\":\"source imbalance\",\"bias_reasoning\":\"Only one source is quoted.\"}\n```")
 	if err != nil {
 		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
 	}
@@ -75,6 +75,9 @@ func TestParseArticleRewriteResultStripsMarkdownFenceAndNormalizesCategories(t *
 	if got, want := strings.Join(rewrite.Categories, ","), "Technology,World"; got != want {
 		t.Fatalf("categories = %q, want %q", got, want)
 	}
+	if rewrite.BiasLabel != "Source imbalance" {
+		t.Fatalf("bias label = %q, want Source imbalance", rewrite.BiasLabel)
+	}
 }
 
 func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
@@ -82,7 +85,9 @@ func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
 		"title":"<strong>Direct title</strong>",
 		"summary":"<p>Short &amp; factual.</p>",
 		"content":"<h2>Update</h2><p>Readable <em>article</em> text.</p><script>ignore()</script>",
-		"categories":["World"]
+		"categories":["World"],
+		"bias_label":"Loaded or sensational framing",
+		"bias_reasoning":"<p>The headline uses <strong>emotionally loaded</strong> wording.</p>"
 	}`)
 	if err != nil {
 		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
@@ -98,6 +103,16 @@ func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
 	}
 	if !strings.Contains(rewrite.Content, "Readable article text.") {
 		t.Fatalf("content lost readable text: %q", rewrite.Content)
+	}
+	if strings.Contains(rewrite.BiasReasoning, "<") || rewrite.BiasReasoning != "The headline uses emotionally loaded wording." {
+		t.Fatalf("bias reasoning retained HTML: %q", rewrite.BiasReasoning)
+	}
+}
+
+func TestParseArticleRewriteResultRequiresBiasAssessment(t *testing.T) {
+	_, err := parseArticleRewriteResult(`{"content":"Body","categories":["World"]}`)
+	if err == nil || !strings.Contains(err.Error(), "bias label") {
+		t.Fatalf("error = %v, want missing bias label error", err)
 	}
 }
 

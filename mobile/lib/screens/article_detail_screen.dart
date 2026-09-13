@@ -40,6 +40,7 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
   // rewriteId of the version the user voted for (null = not yet voted)
   String? _votedForId;
   bool _isVoting = false;
+  final Set<String> _biasReasoningLoading = {};
 
   @override
   void initState() {
@@ -106,6 +107,65 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
       }
     } finally {
       if (mounted) setState(() => _isVoting = false);
+    }
+  }
+
+  Future<void> _revealBiasReasoning(ArticleVersion version) async {
+    final rewriteId = version.rewriteId;
+    if (rewriteId == null || _biasReasoningLoading.contains(rewriteId)) return;
+    setState(() => _biasReasoningLoading.add(rewriteId));
+    try {
+      final data = await ApiService.revealBiasReasoning(
+        articleId: _article.id,
+        rewriteId: rewriteId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _article = _article.withVersions(
+          _article.versions.map((candidate) {
+            if (candidate.rewriteId != rewriteId) return candidate;
+            return candidate.copyWith(
+              biasLabel: data['bias_label'] as String?,
+              biasReasoning: data['bias_reasoning'] as String?,
+              biasReasoningAvailable: true,
+              biasReasoningUnlocked: true,
+            );
+          }).toList(),
+        );
+      });
+      final userId = _userId;
+      final biasLabel = data['bias_label'] as String?;
+      final biasReasoning = data['bias_reasoning'] as String?;
+      if (userId != null && biasLabel != null && biasReasoning != null) {
+        unawaited(ArticleAccessCache.updateBiasReasoning(
+          userId: userId,
+          articleId: _article.id,
+          rewriteId: rewriteId,
+          biasLabel: biasLabel,
+          biasReasoning: biasReasoning,
+        ));
+      }
+      final remaining = data['remaining_today'] as int?;
+      if (remaining != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('$remaining free bias explanations left today')),
+        );
+      }
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          action: error.statusCode == 429
+              ? SnackBarAction(label: 'View plans', onPressed: _openPlans)
+              : null,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _biasReasoningLoading.remove(rewriteId));
+      }
     }
   }
 
@@ -203,6 +263,9 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
     }
     final hasMultiple = article.versions.length > 1;
     final fontScale = context.watch<ReaderSettingsProvider>().fontScale;
+    final tierName = context.watch<AuthProvider>().user?.subscriptionTier;
+    final hasPaidBiasAccess =
+        tierName != null && tierName.toLowerCase() != 'free';
 
     return Scaffold(
       body: NestedScrollView(
@@ -307,6 +370,10 @@ class _ArticleDetailScreenState extends State<ArticleDetailScreen> {
               isVoting: _isVoting,
               llmVersions: llmVersions,
               isAuthenticated: context.read<AuthProvider>().isAuthenticated,
+              hasPaidBiasAccess: hasPaidBiasAccess,
+              isBiasReasoningLoading: version.rewriteId != null &&
+                  _biasReasoningLoading.contains(version.rewriteId),
+              onRevealBiasReasoning: () => _revealBiasReasoning(version),
               onVote: _vote,
             );
           },
@@ -508,7 +575,10 @@ class _VersionBody extends StatelessWidget {
   final String? votedForId;
   final bool isVoting;
   final bool isAuthenticated;
+  final bool hasPaidBiasAccess;
+  final bool isBiasReasoningLoading;
   final List<ArticleVersion> llmVersions;
+  final VoidCallback onRevealBiasReasoning;
   final Future<void> Function(String chosenId, String otherId) onVote;
 
   const _VersionBody({
@@ -519,7 +589,10 @@ class _VersionBody extends StatelessWidget {
     required this.votedForId,
     required this.isVoting,
     required this.isAuthenticated,
+    required this.hasPaidBiasAccess,
+    required this.isBiasReasoningLoading,
     required this.llmVersions,
+    required this.onRevealBiasReasoning,
     required this.onVote,
   });
 
@@ -598,6 +671,16 @@ class _VersionBody extends StatelessWidget {
             ],
           ),
           const Divider(height: 32),
+          if (!version.isOriginal && version.biasLabel != null) ...[
+            _BiasAnalysisCard(
+              version: version,
+              theme: theme,
+              hasPaidAccess: hasPaidBiasAccess,
+              isLoading: isBiasReasoningLoading,
+              onReveal: onRevealBiasReasoning,
+            ),
+            const SizedBox(height: 20),
+          ],
           // Summary
           MarkdownContent(
             markdown: version.summary,
@@ -646,6 +729,108 @@ class _VersionBody extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+}
+
+class _BiasAnalysisCard extends StatelessWidget {
+  final ArticleVersion version;
+  final ThemeData theme;
+  final bool hasPaidAccess;
+  final bool isLoading;
+  final VoidCallback onReveal;
+
+  const _BiasAnalysisCard({
+    required this.version,
+    required this.theme,
+    required this.hasPaidAccess,
+    required this.isLoading,
+    required this.onReveal,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final reasoning = version.biasReasoning;
+    final isUnlocked = version.biasReasoningUnlocked && reasoning != null;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.secondary.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.balance_rounded, color: theme.colorScheme.secondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AI bias check',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    Text(
+                      version.biasLabel!,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (isUnlocked)
+            Text(
+              reasoning,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+                height: 1.5,
+              ),
+            )
+          else if (version.biasReasoningAvailable) ...[
+            Text(
+              hasPaidAccess
+                  ? 'The explanation is included with your plan.'
+                  : 'Free accounts can open 5 bias explanations each day.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(
+              onPressed: isLoading ? null : onReveal,
+              icon: isLoading
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.visibility_outlined),
+              label: Text(isLoading ? 'Opening…' : 'Why this rating?'),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            'AI assessment — use it as a signal, not a verdict.',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSecondaryContainer
+                  .withValues(alpha: 0.75),
+            ),
+          ),
         ],
       ),
     );

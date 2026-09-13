@@ -23,6 +23,7 @@ export function ArticleCard({ article, onClick }: Props) {
   const categories = article.categories?.length ? article.categories : article.category ? [article.category] : [];
   const rewrites = article.rewrites ?? [];
   const hasRewrites = rewrites.length >= 2;
+  const biasLabels = [...new Set(rewrites.map(rewrite => rewrite.bias_label).filter(Boolean))];
 
   return (
     <article className="article-card" onClick={onClick}>
@@ -36,6 +37,13 @@ export function ArticleCard({ article, onClick }: Props) {
         <span className="article-card__source">{article.source_name}</span>
         <span className="article-card__time">{timeAgo(article.published_at)}</span>
       </div>
+
+      {biasLabels.length > 0 && (
+        <div className="article-card__bias">
+          <span aria-hidden="true">&#9878;</span>
+          Bias check: {biasLabels.join(' / ')}
+        </div>
+      )}
 
       {article.image_url && (
         <div className="article-card__image">

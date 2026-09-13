@@ -23,6 +23,9 @@ void main() {
           'title': 'Direct title',
           'summary': 'Direct summary',
           'content': 'Direct content',
+          'bias_label': 'Source imbalance',
+          'bias_reasoning_available': true,
+          'bias_reasoning_unlocked': false,
         },
       ],
     });
@@ -31,5 +34,8 @@ void main() {
     expect(article.versions, hasLength(2));
     expect(article.versions.first.isOriginal, isTrue);
     expect(article.versions.last.rewriteId, 'rewrite-1');
+    expect(article.versions.last.biasLabel, 'Source imbalance');
+    expect(article.versions.last.biasReasoningAvailable, isTrue);
+    expect(article.versions.last.biasReasoningUnlocked, isFalse);
   });
 }

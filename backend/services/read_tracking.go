@@ -15,6 +15,7 @@ type ReadTrackingCleanupStats struct {
 	ExpiredGrants       int64
 	ExpiredFreeReads    int64
 	ExpiredMonthlyUsage int64
+	ExpiredBiasReads    int64
 }
 
 func CleanupReadTracking(ctx context.Context, pool *pgxpool.Pool) (ReadTrackingCleanupStats, error) {
@@ -40,6 +41,12 @@ func CleanupReadTracking(ctx context.Context, pool *pgxpool.Pool) (ReadTrackingC
 	}
 	stats.ExpiredMonthlyUsage = tag.RowsAffected()
 
+	tag, err = pool.Exec(ctx, "DELETE FROM user_bias_reasoning_reads WHERE read_date < CURRENT_DATE - 6")
+	if err != nil {
+		return stats, err
+	}
+	stats.ExpiredBiasReads = tag.RowsAffected()
+
 	return stats, nil
 }
 
@@ -54,9 +61,9 @@ func RunReadTrackingCleanup(ctx context.Context, pool *pgxpool.Pool, interval ti
 			}
 			return
 		}
-		if stats.ExpiredGrants+stats.ExpiredFreeReads+stats.ExpiredMonthlyUsage > 0 {
-			log.Printf("Read tracking cleanup: grants=%d free_reads=%d monthly_usage=%d",
-				stats.ExpiredGrants, stats.ExpiredFreeReads, stats.ExpiredMonthlyUsage)
+		if stats.ExpiredGrants+stats.ExpiredFreeReads+stats.ExpiredMonthlyUsage+stats.ExpiredBiasReads > 0 {
+			log.Printf("Read tracking cleanup: grants=%d free_reads=%d monthly_usage=%d bias_reads=%d",
+				stats.ExpiredGrants, stats.ExpiredFreeReads, stats.ExpiredMonthlyUsage, stats.ExpiredBiasReads)
 		}
 	}
 

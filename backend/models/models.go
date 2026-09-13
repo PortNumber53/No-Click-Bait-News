@@ -144,11 +144,23 @@ type BillingPortalResponse struct {
 // LLM comparison types
 
 type RewriteVersion struct {
-	ID        uuid.UUID `json:"id"`
-	ModelName string    `json:"model_name"`
-	Title     string    `json:"title"`
-	Summary   string    `json:"summary"`
-	Content   *string   `json:"content"`
+	ID                     uuid.UUID `json:"id"`
+	ModelName              string    `json:"model_name"`
+	Title                  string    `json:"title"`
+	Summary                string    `json:"summary"`
+	Content                *string   `json:"content"`
+	BiasLabel              *string   `json:"bias_label,omitempty"`
+	BiasReasoning          *string   `json:"bias_reasoning,omitempty"`
+	BiasReasoningAvailable bool      `json:"bias_reasoning_available"`
+	BiasReasoningUnlocked  bool      `json:"bias_reasoning_unlocked"`
+}
+
+type BiasReasoningResponse struct {
+	ArticleID      uuid.UUID `json:"article_id"`
+	RewriteID      uuid.UUID `json:"rewrite_id"`
+	BiasLabel      string    `json:"bias_label"`
+	BiasReasoning  string    `json:"bias_reasoning"`
+	RemainingToday *int      `json:"remaining_today,omitempty"`
 }
 
 type ComparisonResponse struct {

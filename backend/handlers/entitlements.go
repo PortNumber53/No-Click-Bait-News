@@ -12,6 +12,7 @@ import (
 )
 
 const freeURLFetchesPerDay = 10
+const freeBiasReasoningsPerDay = 5
 const articleAccessRetentionDays = 7
 
 type readingEntitlement struct {
@@ -24,6 +25,11 @@ type readingEntitlement struct {
 type articleReadAccess struct {
 	Allowed   bool
 	ExpiresAt *time.Time
+}
+
+func isPaidTier(access readingEntitlement) bool {
+	tierName := strings.TrimSpace(access.TierName)
+	return tierName != "" && !strings.EqualFold(tierName, "free")
 }
 
 func (h *Handler) getReadingEntitlement(ctx context.Context, userID uuid.UUID) (readingEntitlement, error) {

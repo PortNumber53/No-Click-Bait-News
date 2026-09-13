@@ -5,6 +5,10 @@ class ArticleVersion {
   final String? content;
   final String? rewriteId;
   final bool isOriginal;
+  final String? biasLabel;
+  final String? biasReasoning;
+  final bool biasReasoningAvailable;
+  final bool biasReasoningUnlocked;
 
   const ArticleVersion({
     required this.modelName,
@@ -13,7 +17,33 @@ class ArticleVersion {
     this.content,
     this.rewriteId,
     this.isOriginal = false,
+    this.biasLabel,
+    this.biasReasoning,
+    this.biasReasoningAvailable = false,
+    this.biasReasoningUnlocked = false,
   });
+
+  ArticleVersion copyWith({
+    String? biasLabel,
+    String? biasReasoning,
+    bool? biasReasoningAvailable,
+    bool? biasReasoningUnlocked,
+  }) {
+    return ArticleVersion(
+      modelName: modelName,
+      title: title,
+      summary: summary,
+      content: content,
+      rewriteId: rewriteId,
+      isOriginal: isOriginal,
+      biasLabel: biasLabel ?? this.biasLabel,
+      biasReasoning: biasReasoning ?? this.biasReasoning,
+      biasReasoningAvailable:
+          biasReasoningAvailable ?? this.biasReasoningAvailable,
+      biasReasoningUnlocked:
+          biasReasoningUnlocked ?? this.biasReasoningUnlocked,
+    );
+  }
 }
 
 class Article {
@@ -97,6 +127,12 @@ class Article {
           summary: version['summary'] as String,
           content: version['content'] as String?,
           rewriteId: (version['id'] ?? version['rewrite_id']) as String?,
+          biasLabel: version['bias_label'] as String?,
+          biasReasoning: version['bias_reasoning'] as String?,
+          biasReasoningAvailable:
+              version['bias_reasoning_available'] as bool? ?? false,
+          biasReasoningUnlocked:
+              version['bias_reasoning_unlocked'] as bool? ?? false,
         );
       }),
     ];
