@@ -54,12 +54,21 @@ func (h *Handler) startArticleRewriteWorkers() {
 
 func (h *Handler) articleRewriteWorker(workerID int) {
 	for {
+		reservation, err := h.rewriteControl.WaitForJobStart(context.Background())
+		if err != nil {
+			log.Printf("[articles.rewrite.queue] worker=%d status=admission_failed error=%q", workerID, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		job, found, err := h.claimArticleRewriteJob(context.Background())
 		if err != nil {
+			h.rewriteControl.ReleaseJobStart(reservation)
 			log.Printf("[articles.rewrite.queue] worker=%d status=claim_failed error=%q", workerID, err)
 		} else if found {
 			h.processArticleRewriteJob(workerID, job)
 			continue
+		} else {
+			h.rewriteControl.ReleaseJobStart(reservation)
 		}
 		select {
 		case <-h.rewriteWake:
@@ -736,6 +745,20 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 }
 
 func (h *Handler) failArticleRewriteJob(job articleRewriteJob, jobErr error) {
+	if providerErr, rateLimited := services.IsLLMRateLimitError(jobErr); rateLimited {
+		attempts, availableAt := rateLimitedRewriteRetry(job, providerErr.RetryAt, time.Now().UTC())
+		if _, err := h.pool.Exec(context.Background(),
+			`UPDATE article_rewrite_jobs
+			 SET status = 'pending', attempts = $2, available_at = $3, locked_at = NULL, last_error = $4, updated_at = NOW()
+			 WHERE article_id = $1`,
+			job.ArticleID, attempts, availableAt, truncateRunes(jobErr.Error(), 2000)); err != nil {
+			log.Printf("[articles.rewrite.queue] article_id=%s status=rate_limit_requeue_failed error=%q", job.ArticleID, err)
+			return
+		}
+		log.Printf("[articles.rewrite.queue] article_id=%s status=rate_limited attempts=%d available_at=%s", job.ArticleID, attempts, availableAt.UTC().Format(time.RFC3339))
+		return
+	}
+
 	maxAttempts := intEnv("LLM_REWRITE_MAX_ATTEMPTS", 3)
 	if job.Attempts >= maxAttempts {
 		_, _ = h.pool.Exec(context.Background(),
@@ -758,6 +781,17 @@ func (h *Handler) failArticleRewriteJob(job articleRewriteJob, jobErr error) {
 	case h.rewriteWake <- struct{}{}:
 	default:
 	}
+}
+
+func rateLimitedRewriteRetry(job articleRewriteJob, retryAt, now time.Time) (int, time.Time) {
+	if retryAt.Before(now) {
+		retryAt = now
+	}
+	attempts := job.Attempts - 1
+	if attempts < 0 {
+		attempts = 0
+	}
+	return attempts, retryAt
 }
 
 func (h *Handler) findArticleBySourceURL(r *http.Request, sourceURL string) (models.ArticleResponse, bool, error) {

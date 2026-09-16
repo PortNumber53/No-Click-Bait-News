@@ -119,7 +119,7 @@ func runCrawlNews() {
 		log.Fatalf("Invalid LLM rewrite configuration: %v", err)
 	}
 	if articleRewriter == nil {
-		log.Println("LLM article rewriting disabled for crawler: LLM_API_KEY and LLM_MODEL are not set")
+		log.Println("LLM article rewriting disabled for crawler: LLM_BATCH_API_KEYS and LLM_MODEL/LLM_MODELS are not set")
 	}
 
 	pool, err := pgxpool.New(context.Background(), dbURL)
@@ -184,7 +184,7 @@ func runServer() {
 		log.Fatalf("Invalid LLM rewrite configuration: %v", err)
 	}
 	if len(articleRewriters) == 0 {
-		log.Println("LLM article rewriting disabled: LLM_API_KEY and LLM_MODEL are not set")
+		log.Println("LLM article rewriting disabled: LLM_BATCH_API_KEYS and LLM_MODEL/LLM_MODELS are not set")
 	} else {
 		log.Printf("LLM article rewriting enabled: models=%d", len(articleRewriters))
 	}

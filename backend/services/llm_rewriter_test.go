@@ -3,12 +3,20 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
 
 func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +125,7 @@ func TestParseArticleRewriteResultRequiresBiasAssessment(t *testing.T) {
 }
 
 func TestNewArticleRewritersFromEnvSupportsDistinctModelList(t *testing.T) {
-	t.Setenv("LLM_API_KEY", "test-key")
+	t.Setenv("LLM_BATCH_API_KEYS", "batch-key-a, batch-key-b, batch-key-a")
 	t.Setenv("LLM_MODEL", "")
 	t.Setenv("LLM_MODELS", "model-a, model-b, model-a")
 	rewriters, err := NewArticleRewritersFromEnv()
@@ -132,5 +140,97 @@ func TestNewArticleRewritersFromEnvSupportsDistinctModelList(t *testing.T) {
 	}
 	if rewriters[0].httpClient.Timeout != 5*time.Minute {
 		t.Fatalf("HTTP timeout = %s, want 5m", rewriters[0].httpClient.Timeout)
+	}
+	if rewriters[0].Control() != rewriters[1].Control() {
+		t.Fatal("configured rewriters do not share rewrite control")
+	}
+	first, firstSlot, err := rewriters[0].Control().nextAPIKey()
+	if err != nil {
+		t.Fatalf("first batch key: %v", err)
+	}
+	second, secondSlot, err := rewriters[0].Control().nextAPIKey()
+	if err != nil {
+		t.Fatalf("second batch key: %v", err)
+	}
+	if first != "batch-key-a" || firstSlot != 1 || second != "batch-key-b" || secondSlot != 2 {
+		t.Fatalf("round robin keys = (%q, %d), (%q, %d)", first, firstSlot, second, secondSlot)
+	}
+}
+
+func TestNewArticleRewritersFromEnvDoesNotUseLegacyInteractiveKey(t *testing.T) {
+	t.Setenv("LLM_API_KEY", "interactive-key")
+	t.Setenv("LLM_BATCH_API_KEYS", "")
+	t.Setenv("LLM_MODEL", "model-a")
+	t.Setenv("LLM_MODELS", "")
+	_, err := NewArticleRewritersFromEnv()
+	if err == nil || !strings.Contains(err.Error(), "LLM_BATCH_API_KEYS") {
+		t.Fatalf("error = %v, want missing batch key error", err)
+	}
+}
+
+func TestParseRetryAfterSupportsSecondsAndHTTPDate(t *testing.T) {
+	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	if got := parseRetryAfter("75", now); got != 75*time.Second {
+		t.Fatalf("numeric Retry-After = %s, want 75s", got)
+	}
+	if got := parseRetryAfter(now.Add(2*time.Minute).Format(http.TimeFormat), now); got != 2*time.Minute {
+		t.Fatalf("date Retry-After = %s, want 2m", got)
+	}
+	if got := parseRetryAfter("not-a-date", now); got != 0 {
+		t.Fatalf("invalid Retry-After = %s, want 0", got)
+	}
+}
+
+func TestArticleRewriterReturnsTyped429AndOpensSharedCircuit(t *testing.T) {
+	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	control := newRewriteControl([]string{"batch-key"}, 10, time.Minute, time.Minute, 15*time.Minute)
+	control.now = func() time.Time { return now }
+	control.jitter = func(time.Duration) time.Duration { return 0 }
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("Authorization"); got != "Bearer batch-key" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": []string{"120"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"rate limited"}`)),
+			Request:    r,
+		}, nil
+	})}
+	rewriter := newArticleRewriter(control, "https://provider.example/v1", "model-a", 0.2, 500, client)
+
+	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original")
+	providerErr, ok := IsLLMRateLimitError(err)
+	if !ok {
+		t.Fatalf("error = %v, want typed rate limit error", err)
+	}
+	if providerErr.KeySlot != 1 || providerErr.RetryAfter != 2*time.Minute || !providerErr.RetryAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatalf("provider error = %#v", providerErr)
+	}
+	if _, wait := control.tryReserveJobStart(now); wait != 2*time.Minute {
+		t.Fatalf("shared circuit wait = %s, want 2m", wait)
+	}
+	_, err = rewriter.RewriteArticle(context.Background(), "Another title", "https://example.com/other", "Original")
+	providerErr, ok = IsLLMRateLimitError(err)
+	if !ok || providerErr.KeySlot != 0 || !providerErr.RetryAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatalf("open-circuit error = %#v, %v", providerErr, err)
+	}
+}
+
+func TestArticleRewriterTransportErrorDoesNotOpenCircuit(t *testing.T) {
+	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	control := newRewriteControl([]string{"batch-key"}, 10, time.Minute, time.Minute, 15*time.Minute)
+	control.now = func() time.Time { return now }
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	rewriter := newArticleRewriter(control, "https://provider.example/v1", "model-a", 0.2, 500, client)
+
+	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original")
+	if err == nil || !strings.Contains(err.Error(), "network unavailable") {
+		t.Fatalf("error = %v, want transport error", err)
+	}
+	if control.breakerOpen {
+		t.Fatal("transport error opened the rate-limit circuit")
 	}
 }

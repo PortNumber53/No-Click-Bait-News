@@ -19,6 +19,7 @@ type Handler struct {
 	tinyFish              *services.TinyFishClient
 	articleRewriter       *services.ArticleRewriter
 	articleRewriters      []*services.ArticleRewriter
+	rewriteControl        *services.RewriteControl
 	rewriteWake           chan struct{}
 }
 
@@ -34,6 +35,7 @@ func New(pool *pgxpool.Pool, jwtSecret, stripeKey, webhookSecretThin, webhookSec
 	}
 	if len(articleRewriters) > 0 {
 		h.articleRewriter = articleRewriters[0]
+		h.rewriteControl = articleRewriters[0].Control()
 	}
 	h.startArticleRewriteWorkers()
 	return h

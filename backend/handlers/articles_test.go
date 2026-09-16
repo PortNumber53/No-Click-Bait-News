@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeNewsURLRejectsUnsafeTargets(t *testing.T) {
@@ -20,6 +21,22 @@ func TestNormalizeNewsURLRejectsUnsafeTargets(t *testing.T) {
 		if _, _, err := normalizeNewsURL(context.Background(), raw); err == nil {
 			t.Errorf("normalizeNewsURL(%q) unexpectedly succeeded", raw)
 		}
+	}
+}
+
+func TestRateLimitedRewriteRetryDoesNotConsumeAttempt(t *testing.T) {
+	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	attempts, availableAt := rateLimitedRewriteRetry(articleRewriteJob{Attempts: 3}, now.Add(2*time.Minute), now)
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if !availableAt.Equal(now.Add(2 * time.Minute)) {
+		t.Fatalf("availableAt = %s, want %s", availableAt, now.Add(2*time.Minute))
+	}
+
+	attempts, availableAt = rateLimitedRewriteRetry(articleRewriteJob{Attempts: 0}, now.Add(-time.Minute), now)
+	if attempts != 0 || !availableAt.Equal(now) {
+		t.Fatalf("clamped retry = attempts %d at %s", attempts, availableAt)
 	}
 }
 

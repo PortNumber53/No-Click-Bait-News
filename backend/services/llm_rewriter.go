@@ -25,12 +25,34 @@ const (
 )
 
 type ArticleRewriter struct {
-	apiKey      string
 	baseURL     string
 	model       string
 	temperature float64
 	maxTokens   int
 	httpClient  *http.Client
+	control     *RewriteControl
+}
+
+// LLMProviderError describes an HTTP failure returned by the rewrite provider.
+type LLMProviderError struct {
+	StatusCode int
+	KeySlot    int
+	RetryAfter time.Duration
+	RetryAt    time.Time
+	Body       string
+}
+
+func (e *LLMProviderError) Error() string {
+	return fmt.Sprintf("LLM rewrite API returned HTTP %d (key_slot=%d): %s", e.StatusCode, e.KeySlot, e.Body)
+}
+
+// IsLLMRateLimitError identifies provider and local-circuit rate limiting.
+func IsLLMRateLimitError(err error) (*LLMProviderError, bool) {
+	var providerErr *LLMProviderError
+	if !errors.As(err, &providerErr) || providerErr.StatusCode != http.StatusTooManyRequests {
+		return nil, false
+	}
+	return providerErr, true
 }
 
 type ArticleRewriteResult struct {
@@ -69,19 +91,23 @@ func NewArticleRewriterFromEnv() (*ArticleRewriter, error) {
 }
 
 func NewArticleRewritersFromEnv() ([]*ArticleRewriter, error) {
-	apiKey := strings.TrimSpace(os.Getenv("LLM_API_KEY"))
+	apiKeysRaw := strings.TrimSpace(os.Getenv("LLM_BATCH_API_KEYS"))
 	modelsRaw := strings.TrimSpace(os.Getenv("LLM_MODELS"))
 	if modelsRaw == "" {
 		modelsRaw = strings.TrimSpace(os.Getenv("LLM_MODEL"))
 	}
-	if apiKey == "" && modelsRaw == "" {
+	if apiKeysRaw == "" && modelsRaw == "" {
 		return nil, nil
 	}
-	if apiKey == "" {
-		return nil, errors.New("LLM_API_KEY is required when LLM_MODEL or LLM_MODELS is set")
+	if apiKeysRaw == "" {
+		return nil, errors.New("LLM_BATCH_API_KEYS is required when LLM_MODEL or LLM_MODELS is set")
 	}
 	if modelsRaw == "" {
-		return nil, errors.New("LLM_MODEL is required when LLM_API_KEY is set")
+		return nil, errors.New("LLM_MODEL or LLM_MODELS is required when LLM_BATCH_API_KEYS is set")
+	}
+	apiKeys := uniqueNonEmptyStrings(strings.Split(apiKeysRaw, ","))
+	if len(apiKeys) == 0 {
+		return nil, errors.New("LLM_BATCH_API_KEYS must include at least one key")
 	}
 	models := uniqueNonEmptyStrings(strings.Split(modelsRaw, ","))
 	if len(models) == 0 {
@@ -110,12 +136,44 @@ func NewArticleRewritersFromEnv() ([]*ArticleRewriter, error) {
 		}
 		maxTokens = parsed
 	}
+	startsPerInterval, err := positiveIntEnv("LLM_REWRITE_STARTS_PER_INTERVAL", defaultRewriteStartsPerInterval)
+	if err != nil {
+		return nil, err
+	}
+	intervalSeconds, err := positiveIntEnv("LLM_REWRITE_INTERVAL_SECONDS", int(defaultRewriteInterval/time.Second))
+	if err != nil {
+		return nil, err
+	}
+	backoffBaseSeconds, err := positiveIntEnv("LLM_REWRITE_429_BASE_SECONDS", int(defaultRewrite429Base/time.Second))
+	if err != nil {
+		return nil, err
+	}
+	backoffMaxSeconds, err := positiveIntEnv("LLM_REWRITE_429_MAX_SECONDS", int(defaultRewrite429Max/time.Second))
+	if err != nil {
+		return nil, err
+	}
+	if backoffMaxSeconds < backoffBaseSeconds {
+		return nil, errors.New("LLM_REWRITE_429_MAX_SECONDS must be greater than or equal to LLM_REWRITE_429_BASE_SECONDS")
+	}
+	control := newRewriteControl(apiKeys, startsPerInterval, time.Duration(intervalSeconds)*time.Second, time.Duration(backoffBaseSeconds)*time.Second, time.Duration(backoffMaxSeconds)*time.Second)
 
 	rewriters := make([]*ArticleRewriter, 0, len(models))
 	for _, model := range models {
-		rewriters = append(rewriters, NewArticleRewriter(apiKey, baseURL, model, temperature, maxTokens, nil))
+		rewriters = append(rewriters, newArticleRewriter(control, baseURL, model, temperature, maxTokens, nil))
 	}
 	return rewriters, nil
+}
+
+func positiveIntEnv(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 1 {
+		return 0, fmt.Errorf("invalid %s %q", key, raw)
+	}
+	return parsed, nil
 }
 
 func uniqueNonEmptyStrings(values []string) []string {
@@ -132,6 +190,11 @@ func uniqueNonEmptyStrings(values []string) []string {
 }
 
 func NewArticleRewriter(apiKey, baseURL, model string, temperature float64, maxTokens int, httpClient *http.Client) *ArticleRewriter {
+	control := newRewriteControl(uniqueNonEmptyStrings([]string{apiKey}), defaultRewriteStartsPerInterval, defaultRewriteInterval, defaultRewrite429Base, defaultRewrite429Max)
+	return newArticleRewriter(control, baseURL, model, temperature, maxTokens, httpClient)
+}
+
+func newArticleRewriter(control *RewriteControl, baseURL, model string, temperature float64, maxTokens int, httpClient *http.Client) *ArticleRewriter {
 	if baseURL == "" {
 		baseURL = defaultLLMBaseURL
 	}
@@ -145,13 +208,20 @@ func NewArticleRewriter(apiKey, baseURL, model string, temperature float64, maxT
 		httpClient = &http.Client{Timeout: defaultLLMHTTPTimeout}
 	}
 	return &ArticleRewriter{
-		apiKey:      strings.TrimSpace(apiKey),
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       strings.TrimSpace(model),
 		temperature: temperature,
 		maxTokens:   maxTokens,
 		httpClient:  httpClient,
+		control:     control,
 	}
+}
+
+func (r *ArticleRewriter) Control() *RewriteControl {
+	if r == nil {
+		return nil
+	}
+	return r.control
 }
 
 func (r *ArticleRewriter) AgentVersion() int {
@@ -172,8 +242,19 @@ func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, 
 	if r == nil {
 		return ArticleRewriteResult{}, errors.New("article rewriter is not configured")
 	}
-	if r.apiKey == "" || r.model == "" {
+	if r.control == nil || r.model == "" {
 		return ArticleRewriteResult{}, errors.New("article rewriter API key and model are required")
+	}
+	if retryAt, open := r.control.cooldownUntil(r.control.now()); open {
+		return ArticleRewriteResult{}, &LLMProviderError{
+			StatusCode: http.StatusTooManyRequests,
+			RetryAt:    retryAt,
+			Body:       "shared rate-limit circuit breaker is open",
+		}
+	}
+	apiKey, keySlot, err := r.control.nextAPIKey()
+	if err != nil {
+		return ArticleRewriteResult{}, err
 	}
 
 	prompt := fmt.Sprintf(`Rewrite this news article in clean markdown for NoClickBait News and classify it.
@@ -235,7 +316,7 @@ Original markdown:
 	if err != nil {
 		return ArticleRewriteResult{}, fmt.Errorf("create LLM rewrite request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := r.httpClient.Do(req)
@@ -246,8 +327,14 @@ Original markdown:
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return ArticleRewriteResult{}, fmt.Errorf("LLM rewrite API returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		providerErr := &LLMProviderError{StatusCode: resp.StatusCode, KeySlot: keySlot, Body: strings.TrimSpace(string(responseBody))}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			providerErr.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), r.control.now())
+			providerErr.RetryAt = r.control.recordRateLimit(providerErr.RetryAfter)
+		}
+		return ArticleRewriteResult{}, providerErr
 	}
+	r.control.recordSuccess()
 
 	var decoded chatCompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
@@ -266,6 +353,24 @@ Original markdown:
 		return ArticleRewriteResult{}, err
 	}
 	return result, nil
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
 }
 
 func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {

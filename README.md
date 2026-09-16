@@ -81,7 +81,7 @@ TinyFish settings:
 | `TINYFISH_FETCH_TTL` | `3600` | Cache freshness tolerance in seconds; use `0` for live fetches |
 | `TINYFISH_FETCH_TIMEOUT_MS` | `45000` | Per-URL timeout sent to TinyFish |
 | `NEWS_CRAWLER_LIMIT` | `25` | Maximum number of new articles inserted by each crawl |
-| `LLM_API_KEY` | unset | API key for the OpenAI-compatible rewrite API |
+| `LLM_BATCH_API_KEYS` | unset | Comma-separated, batch-only API key pool for article rewrites |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base URL |
 | `LLM_MODEL` | unset | Chat completions model used for article rewrites |
 | `LLM_MODELS` | unset | Optional comma-separated model list; two or more models enable blind comparisons |
@@ -90,6 +90,10 @@ TinyFish settings:
 | `LLM_REWRITE_TIMEOUT_SECONDS` | `300` | Overall time budget for each article rewrite job |
 | `LLM_REWRITE_STALE_ON_START_LIMIT` | `100` | Number of outdated article rewrites to queue when the API starts |
 | `LLM_REWRITE_MAX_ATTEMPTS` | `3` | Durable rewrite attempts before marking an article failed |
+| `LLM_REWRITE_STARTS_PER_INTERVAL` | `10` | Maximum article rewrite jobs started in each rolling interval |
+| `LLM_REWRITE_INTERVAL_SECONDS` | `60` | Rolling rewrite admission interval in seconds |
+| `LLM_REWRITE_429_BASE_SECONDS` | `60` | Initial shared cooldown after an upstream HTTP 429 |
+| `LLM_REWRITE_429_MAX_SECONDS` | `900` | Maximum shared 429 cooldown, including `Retry-After` and jitter |
 | `CHECKOUT_RETURN_ORIGIN` | `https://ncbnews.truvis.co` | Trusted Stripe checkout return origin |
 
 Stripe Checkout uses recurring monthly Prices created by the backend's tier sync.
@@ -103,13 +107,20 @@ least two models through `LLM_MODELS` (or a comma-separated `LLM_MODEL`) to popu
 the comparison and voting views. `backend/scripts/process_news.py` is retained only
 for legacy/manual backfills; it is not part of the deployed request pipeline.
 
-For FreeLLMAPI, map the Hermes-style model config like this:
+For FreeLLMAPI, use credentials dedicated to batch rewriting and explicit models
+approved for batch traffic. Do not reuse interactive 386GPT credentials or the
+provider's automatic route:
 
 ```bash
 LLM_BASE_URL=https://freellmapi.example.com/v1
-LLM_API_KEY=freellmapi-your-key
-LLM_MODELS=nemotron-3-super-120b,auto
+LLM_BATCH_API_KEYS=freellmapi-batch-key-1,freellmapi-batch-key-2
+LLM_MODELS=batch-approved-model-1,batch-approved-model-2
 ```
+
+An HTTP 429 from any configured model opens a process-wide circuit breaker. All
+rewrite workers pause until the provider's `Retry-After` value or the configured
+exponential cooldown expires. Transport errors and non-429 responses do not open
+the circuit, and rate-limited jobs do not consume their per-article retry budget.
 
 Expose the API over HTTPS, restrict ingress to the backend host, and keep its raw
 service port private.
