@@ -32,6 +32,7 @@ type articleRewriteJob struct {
 	Title           string
 	SourceURL       string
 	OriginalContent string
+	ImageURLs       []string
 	Attempts        int
 }
 
@@ -297,7 +298,8 @@ func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.A
 		            SELECT 1 FROM user_bias_reasoning_reads ubrr
 		            WHERE ubrr.user_id = $3::uuid AND ubrr.rewrite_id = ar.id AND ubrr.read_date = CURRENT_DATE
 		          )
-		        ))
+		        )),
+		        COALESCE(ar.image_urls, ARRAY[]::text[])
 		 FROM article_rewrites ar
 		 JOIN llm_models lm ON lm.id = ar.llm_model_id
 		 WHERE ar.article_id = ANY($1::uuid[]) AND ar.processing_status = 'completed'
@@ -311,7 +313,7 @@ func (h *Handler) attachArticleRewrites(ctx context.Context, articles []models.A
 		var articleID uuid.UUID
 		var rv models.RewriteVersion
 		if err := rows.Scan(&articleID, &rv.ID, &rv.ModelName, &rv.Title, &rv.Summary, &rv.Content,
-			&rv.BiasLabel, &rv.BiasReasoning, &rv.BiasReasoningAvailable, &rv.BiasReasoningUnlocked); err != nil {
+			&rv.BiasLabel, &rv.BiasReasoning, &rv.BiasReasoningAvailable, &rv.BiasReasoningUnlocked, &rv.ImageURLs); err != nil {
 			log.Printf("[articles.rewrites] status=scan_failed error=%q", err)
 			continue
 		}
@@ -490,6 +492,7 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadGateway, "Fetched article did not include readable content")
 		return
 	}
+	imageCandidates := services.ArticleImageURLsFromText(originalContent)
 	log.Printf("[articles.fetch] request_id=%s status=tinyfish_ok url=%q bytes=%d elapsed_ms=%d", requestID, sourceURL, len(originalContent), time.Since(start).Milliseconds())
 
 	title := chooseArticleTitle(page.Title, sourceURL)
@@ -500,10 +503,10 @@ func (h *Handler) FetchArticle(w http.ResponseWriter, r *http.Request) {
 
 	var article models.ArticleResponse
 	err = h.pool.QueryRow(r.Context(),
-		fmt.Sprintf(`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, is_premium, submitted_by_user_id)
-		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, $7::text, ARRAY[$7::text], $8, false, $9)
+		fmt.Sprintf(`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, image_candidates, is_premium, submitted_by_user_id)
+		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, $7::text, ARRAY[$7::text], $8, $9, false, $10)
 		 RETURNING id, title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, image_url, category, %s, published_at, is_premium, view_count`, articleCategoriesSelect),
-		title, summary, originalContent, originalContent, sourceName, sourceURL, category, publishedAt, submittedBy,
+		title, summary, originalContent, originalContent, sourceName, sourceURL, category, publishedAt, imageCandidates, submittedBy,
 	).Scan(&article.ID, &article.Title, &article.Summary, &article.Content, &article.OriginalContent, &article.RewriteStatus, &article.LLMRewriteVersion, &article.SourceName, &article.SourceURL,
 		&article.ImageURL, &article.Category, &article.Categories, &article.PublishedAt, &article.IsPremium, &article.ViewCount)
 	if err != nil {
@@ -608,7 +611,12 @@ func (h *Handler) claimArticleRewriteJob(ctx context.Context) (articleRewriteJob
 
 	var job articleRewriteJob
 	err = tx.QueryRow(ctx,
-		`SELECT j.article_id, a.title, a.source_url, a.original_content, j.attempts
+		`SELECT j.article_id, a.title, a.source_url, a.original_content,
+		        CASE
+		          WHEN a.image_url IS NULL OR btrim(a.image_url) = '' THEN COALESCE(a.image_candidates, ARRAY[]::text[])
+		          ELSE ARRAY[a.image_url] || COALESCE(a.image_candidates[1:2], ARRAY[]::text[])
+		        END,
+		        j.attempts
 		 FROM article_rewrite_jobs j
 		 JOIN articles a ON a.id = j.article_id
 		 WHERE (j.status = 'pending' AND j.available_at <= NOW())
@@ -616,7 +624,7 @@ func (h *Handler) claimArticleRewriteJob(ctx context.Context) (articleRewriteJob
 		 ORDER BY j.available_at, j.created_at
 		 FOR UPDATE OF j SKIP LOCKED
 		 LIMIT 1`,
-	).Scan(&job.ArticleID, &job.Title, &job.SourceURL, &job.OriginalContent, &job.Attempts)
+	).Scan(&job.ArticleID, &job.Title, &job.SourceURL, &job.OriginalContent, &job.ImageURLs, &job.Attempts)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return articleRewriteJob{}, false, nil
@@ -650,7 +658,7 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 	}
 	generated := make([]generatedRewrite, 0, len(h.articleRewriters))
 	for _, rewriter := range h.articleRewriters {
-		rewrite, err := rewriter.RewriteArticle(ctx, job.Title, job.SourceURL, job.OriginalContent)
+		rewrite, err := rewriter.RewriteArticle(ctx, job.Title, job.SourceURL, job.OriginalContent, job.ImageURLs)
 		if err != nil {
 			log.Printf("[articles.rewrite] worker=%d article_id=%s model=%q status=failed url=%q error=%q elapsed_ms=%d", workerID, job.ArticleID, rewriter.Model(), job.SourceURL, err, time.Since(start).Milliseconds())
 			h.failArticleRewriteJob(job, err)
@@ -671,6 +679,10 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 
 	primary := generated[0].Result
 	category := models.PrimaryArticleCategory(primary.Categories, nil)
+	var primaryImageURL any
+	if len(primary.ImageURLs) > 0 {
+		primaryImageURL = primary.ImageURLs[0]
+	}
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
 		h.failArticleRewriteJob(job, err)
@@ -682,9 +694,9 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 		 SET original_title = COALESCE(original_title, title),
 		     original_summary = COALESCE(original_summary, summary),
 		     title = $1, content = $2, summary = $3, category = $4, categories = $5,
-		     rewrite_status = 'complete', llm_rewrite_version = $6
-		 WHERE id = $7 AND original_content IS NOT NULL`,
-		primary.Title, primary.Content, primary.Summary, category, primary.Categories, h.articleRewriter.AgentVersion(), job.ArticleID,
+		     image_url = $6, rewrite_status = 'complete', llm_rewrite_version = $7
+		 WHERE id = $8 AND original_content IS NOT NULL`,
+		primary.Title, primary.Content, primary.Summary, category, primary.Categories, primaryImageURL, h.articleRewriter.AgentVersion(), job.ArticleID,
 	)
 	if err != nil {
 		log.Printf("[articles.rewrite] worker=%d article_id=%s status=update_failed url=%q error=%q elapsed_ms=%d", workerID, job.ArticleID, job.SourceURL, err, time.Since(start).Milliseconds())
@@ -711,16 +723,17 @@ func (h *Handler) processArticleRewriteJob(workerID int, job articleRewriteJob) 
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO article_rewrites
-			 (article_id, llm_model_id, rewritten_title, rewritten_summary, rewritten_content, bias_label, bias_reasoning, processing_status)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, 'completed')
+			 (article_id, llm_model_id, rewritten_title, rewritten_summary, rewritten_content, bias_label, bias_reasoning, image_urls, processing_status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed')
 			 ON CONFLICT (article_id, llm_model_id) DO UPDATE SET
 			 rewritten_title = EXCLUDED.rewritten_title,
 			 rewritten_summary = EXCLUDED.rewritten_summary,
 			 rewritten_content = EXCLUDED.rewritten_content,
 			 bias_label = EXCLUDED.bias_label,
 			 bias_reasoning = EXCLUDED.bias_reasoning,
+			 image_urls = EXCLUDED.image_urls,
 			 processing_status = 'completed', error_message = NULL`,
-			job.ArticleID, modelID, item.Result.Title, item.Result.Summary, item.Result.Content, item.Result.BiasLabel, item.Result.BiasReasoning,
+			job.ArticleID, modelID, item.Result.Title, item.Result.Summary, item.Result.Content, item.Result.BiasLabel, item.Result.BiasReasoning, item.Result.ImageURLs,
 		); err != nil {
 			_ = tx.Rollback(ctx)
 			h.failArticleRewriteJob(job, err)

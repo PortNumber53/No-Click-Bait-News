@@ -600,6 +600,9 @@ class _VersionBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat.yMMMd().add_jm();
     final hasVoted = votedForId != null;
+    final inlineImages = version.imageUrls
+        .where((imageURL) => imageURL != article.imageUrl)
+        .toList();
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
@@ -690,6 +693,10 @@ class _VersionBody extends StatelessWidget {
               height: 1.65,
             ),
           ),
+          if (!version.isOriginal && inlineImages.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            _ArticleImageGallery(imageURLs: inlineImages, theme: theme),
+          ],
           // Full content
           if (version.content != null && version.content!.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -731,6 +738,49 @@ class _VersionBody extends StatelessWidget {
           const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+}
+
+class _ArticleImageGallery extends StatelessWidget {
+  final List<String> imageURLs;
+  final ThemeData theme;
+
+  const _ArticleImageGallery({required this.imageURLs, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        for (var index = 0; index < imageURLs.length; index++) ...[
+          Semantics(
+            label: 'Article image ${index + 1}',
+            image: true,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: CachedNetworkImage(
+                  imageUrl: imageURLs[index],
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+                  errorWidget: (_, __, ___) => Container(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (index != imageURLs.length - 1) const SizedBox(height: 12),
+        ],
+      ],
     );
   }
 }

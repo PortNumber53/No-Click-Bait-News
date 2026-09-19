@@ -78,6 +78,20 @@
   margin: 0;
 }
 
+.comparison__version-images {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.comparison__version-images img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
 .comparison__version-content {
   font-size: 0.8125rem;
   line-height: 1.6;

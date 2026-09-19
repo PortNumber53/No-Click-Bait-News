@@ -21,7 +21,7 @@ const (
 	defaultLLMTemperature      = 0.2
 	defaultLLMMaxTokens        = 3000
 	defaultLLMHTTPTimeout      = 5 * time.Minute
-	ArticleRewriteAgentVersion = 3
+	ArticleRewriteAgentVersion = 4
 )
 
 type ArticleRewriter struct {
@@ -62,6 +62,7 @@ type ArticleRewriteResult struct {
 	Summary       string   `json:"summary,omitempty"`
 	BiasLabel     string   `json:"bias_label"`
 	BiasReasoning string   `json:"bias_reasoning"`
+	ImageURLs     []string `json:"image_urls"`
 }
 
 type chatCompletionRequest struct {
@@ -238,7 +239,7 @@ func (r *ArticleRewriter) Model() string {
 	return r.model
 }
 
-func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, originalMarkdown string) (ArticleRewriteResult, error) {
+func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, originalMarkdown string, candidateImageURLs []string) (ArticleRewriteResult, error) {
 	if r == nil {
 		return ArticleRewriteResult{}, errors.New("article rewriter is not configured")
 	}
@@ -257,6 +258,7 @@ func (r *ArticleRewriter) RewriteArticle(ctx context.Context, title, sourceURL, 
 		return ArticleRewriteResult{}, err
 	}
 
+	candidateImagesJSON, _ := json.Marshal(candidateImageURLs)
 	prompt := fmt.Sprintf(`Rewrite this news article in clean markdown for NoClickBait News and classify it.
 
 Agent version: %d
@@ -275,6 +277,8 @@ Rules:
 - Assess bias in the original article, not in your rewrite. Use specific textual evidence and do not infer the author's private intent.
 - bias_label must be exactly one of: No clear bias, Left-leaning, Right-leaning, Mixed political framing, Loaded or sensational framing, Source imbalance, Promotional or advocacy framing, Unclear.
 - bias_reasoning must be a neutral 2-4 sentence explanation of the evidence for the label. If there is not enough evidence, use Unclear and explain what is missing.
+- Select up to 3 images that are directly relevant to this specific article from Candidate image URLs.
+- image_urls may contain only exact URLs from Candidate image URLs. Never invent, alter, or substitute an image URL. Return an empty array when no candidate is relevant.
 - Return only valid JSON. Do not wrap it in markdown fences.
 
 JSON shape:
@@ -284,14 +288,16 @@ JSON shape:
   "content": "rewritten article markdown",
   "categories": ["Business", "Technology"],
   "bias_label": "No clear bias",
-  "bias_reasoning": "The article attributes its factual claims and avoids loaded wording. It presents no clear political or promotional framing."
+  "bias_reasoning": "The article attributes its factual claims and avoids loaded wording. It presents no clear political or promotional framing.",
+  "image_urls": ["https://publisher.example/image.jpg"]
 }
 
 Title: %s
 Source URL: %s
+Candidate image URLs: %s
 
 Original markdown:
-%s`, r.AgentVersion(), strings.Join(models.AllowedArticleCategories, ", "), title, sourceURL, originalMarkdown)
+%s`, r.AgentVersion(), strings.Join(models.AllowedArticleCategories, ", "), title, sourceURL, string(candidateImagesJSON), originalMarkdown)
 
 	body, err := json.Marshal(chatCompletionRequest{
 		Model: r.model,
@@ -348,7 +354,7 @@ Original markdown:
 	if raw == "" {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite response was empty")
 	}
-	result, err := parseArticleRewriteResult(raw)
+	result, err := parseArticleRewriteResult(raw, candidateImageURLs)
 	if err != nil {
 		return ArticleRewriteResult{}, err
 	}
@@ -373,7 +379,7 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 	return when.Sub(now)
 }
 
-func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
+func parseArticleRewriteResult(raw string, candidateImageURLs []string) (ArticleRewriteResult, error) {
 	raw = strings.TrimSpace(raw)
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
@@ -390,6 +396,7 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 	result.Summary = strings.Join(strings.Fields(stripHTMLMarkup(result.Summary)), " ")
 	result.BiasLabel = normalizeBiasLabel(result.BiasLabel)
 	result.BiasReasoning = strings.Join(strings.Fields(stripHTMLMarkup(result.BiasReasoning)), " ")
+	result.ImageURLs = approvedImageURLs(result.ImageURLs, candidateImageURLs)
 	if result.Content == "" {
 		return ArticleRewriteResult{}, errors.New("LLM rewrite content was empty")
 	}
@@ -405,6 +412,30 @@ func parseArticleRewriteResult(raw string) (ArticleRewriteResult, error) {
 	}
 
 	return result, nil
+}
+
+func approvedImageURLs(selected, candidates []string) []string {
+	allowed := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if isUsableArticleImageURL(candidate) {
+			allowed[candidate] = true
+		}
+	}
+	approved := make([]string, 0, min(3, len(selected)))
+	seen := make(map[string]bool, len(selected))
+	for _, imageURL := range selected {
+		imageURL = strings.TrimSpace(imageURL)
+		if imageURL == "" || !allowed[imageURL] || seen[imageURL] {
+			continue
+		}
+		seen[imageURL] = true
+		approved = append(approved, imageURL)
+		if len(approved) == 3 {
+			break
+		}
+	}
+	return approved
 }
 
 func normalizeBiasLabel(value string) string {

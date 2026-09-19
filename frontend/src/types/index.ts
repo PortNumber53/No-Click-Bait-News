@@ -58,6 +58,7 @@ export interface RewriteVersion {
   bias_reasoning?: string;
   bias_reasoning_available: boolean;
   bias_reasoning_unlocked: boolean;
+  image_urls: string[];
 }
 
 export interface BiasReasoningResponse {

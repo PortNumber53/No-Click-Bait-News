@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ type feedArticle struct {
 	URL         string
 	Description string
 	PublishedAt *time.Time
+	ImageURLs   []string
 }
 
 type contentFetchJob struct {
@@ -75,14 +77,34 @@ type feedFetchResult struct {
 	Err      error
 }
 
+var rssDescriptionImagePattern = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
+var markdownImagePattern = regexp.MustCompile(`!\[[^\]]*\]\(\s*<?(https?://[^>\s)]+)>?(?:\s+["'][^)]*["'])?\s*\)`)
+
+type rssMediaImage struct {
+	URL    string `xml:"url,attr"`
+	Type   string `xml:"type,attr"`
+	Medium string `xml:"medium,attr"`
+}
+
+type rssEnclosure struct {
+	URL  string `xml:"url,attr"`
+	Type string `xml:"type,attr"`
+}
+
+type rssItem struct {
+	Title           string          `xml:"title"`
+	Link            string          `xml:"link"`
+	Description     string          `xml:"description"`
+	PubDate         string          `xml:"pubDate"`
+	Image           string          `xml:"image"`
+	MediaContent    []rssMediaImage `xml:"http://search.yahoo.com/mrss/ content"`
+	MediaThumbnails []rssMediaImage `xml:"http://search.yahoo.com/mrss/ thumbnail"`
+	Enclosures      []rssEnclosure  `xml:"enclosure"`
+}
+
 type rssFeed struct {
 	Channel struct {
-		Items []struct {
-			Title       string `xml:"title"`
-			Link        string `xml:"link"`
-			Description string `xml:"description"`
-			PubDate     string `xml:"pubDate"`
-		} `xml:"item"`
+		Items []rssItem `xml:"item"`
 	} `xml:"channel"`
 }
 
@@ -265,6 +287,13 @@ func crawlFetchContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFi
 	var existingID uuid.UUID
 	err := pool.QueryRow(ctx, "SELECT id FROM articles WHERE source_url = $1 LIMIT 1", article.URL).Scan(&existingID)
 	if err == nil {
+		if len(article.ImageURLs) > 0 {
+			_, _ = pool.Exec(ctx,
+				`UPDATE articles SET image_candidates = $2
+				 WHERE id = $1 AND COALESCE(array_length(image_candidates, 1), 0) = 0`,
+				existingID, article.ImageURLs,
+			)
+		}
 		stats.skipped.Add(1)
 		return uuid.Nil, "", "", false
 	}
@@ -287,6 +316,7 @@ func crawlFetchContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFi
 		log.Printf("[news.crawler.fetch] url=%q status=tinyfish_empty", article.URL)
 		return uuid.Nil, "", "", false
 	}
+	article.ImageURLs = mergeArticleImageURLs(article.ImageURLs, ArticleImageURLsFromText(originalContent))
 
 	title := strings.TrimSpace(article.Title)
 	if page.Title != nil && strings.TrimSpace(*page.Title) != "" {
@@ -307,8 +337,8 @@ func crawlFetchContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFi
 
 	var articleID uuid.UUID
 	err = pool.QueryRow(ctx,
-		`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, is_premium)
-		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, 'Crawled', ARRAY['Crawled'], LEAST($7, NOW()), false)
+		`INSERT INTO articles (title, summary, content, original_content, rewrite_status, llm_rewrite_version, source_name, source_url, category, categories, published_at, image_candidates, is_premium)
+		 VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6, 'Crawled', ARRAY['Crawled'], LEAST($7, NOW()), $8, false)
 		 RETURNING id`,
 		truncateText(title, 240),
 		truncateText(summary, 500),
@@ -317,6 +347,7 @@ func crawlFetchContent(ctx context.Context, pool *pgxpool.Pool, tinyFish *TinyFi
 		sourceNameFromURL(article.URL),
 		article.URL,
 		publishedAt,
+		article.ImageURLs,
 	).Scan(&articleID)
 	if err != nil {
 		stats.failed.Add(1)
@@ -373,9 +404,85 @@ func fetchFeedArticles(ctx context.Context, feedURL string) ([]feedArticle, erro
 			URL:         strings.TrimSpace(item.Link),
 			Description: summarizeText(item.Description, 500),
 			PublishedAt: parseFeedTime(item.PubDate),
+			ImageURLs:   rssItemImageURLs(item),
 		})
 	}
 	return articles, nil
+}
+
+func rssItemImageURLs(item rssItem) []string {
+	candidates := []string{item.Image}
+	for _, media := range append(item.MediaContent, item.MediaThumbnails...) {
+		if media.Type == "" || strings.HasPrefix(strings.ToLower(media.Type), "image/") || strings.EqualFold(media.Medium, "image") {
+			candidates = append(candidates, media.URL)
+		}
+	}
+	for _, enclosure := range item.Enclosures {
+		if strings.HasPrefix(strings.ToLower(enclosure.Type), "image/") {
+			candidates = append(candidates, enclosure.URL)
+		}
+	}
+	candidates = append(candidates, ArticleImageURLsFromText(item.Description)...)
+
+	return mergeArticleImageURLs(candidates)
+}
+
+// ArticleImageURLsFromText finds publisher-provided image URLs embedded in
+// fetched HTML or Markdown. The rewrite agent still decides whether each image
+// is relevant, and its response is checked against this exact candidate list.
+func ArticleImageURLsFromText(value string) []string {
+	candidates := make([]string, 0, 3)
+	for _, match := range rssDescriptionImagePattern.FindAllStringSubmatch(value, -1) {
+		candidates = append(candidates, match[1])
+	}
+	for _, match := range markdownImagePattern.FindAllStringSubmatch(value, -1) {
+		candidates = append(candidates, match[1])
+	}
+	return mergeArticleImageURLs(candidates)
+}
+
+func mergeArticleImageURLs(groups ...[]string) []string {
+	candidates := make([]string, 0, 3)
+	for _, group := range groups {
+		candidates = append(candidates, group...)
+	}
+	result := make([]string, 0, min(3, len(candidates)))
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if !isUsableArticleImageURL(candidate) || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		result = append(result, candidate)
+		if len(result) == 3 {
+			break
+		}
+	}
+	return result
+}
+
+func isUsableArticleImageURL(candidate string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(candidate))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return false
+	}
+	lowerPath := strings.ToLower(parsed.Path)
+	for _, marker := range []string{"pixel", "spacer", "beacon", "tracking", "track.gif", "1x1"} {
+		if strings.Contains(lowerPath, marker) {
+			return false
+		}
+	}
+	query := parsed.Query()
+	for _, key := range []string{"width", "w", "height", "h"} {
+		if value := query.Get(key); value != "" {
+			dimension, err := strconv.Atoi(value)
+			if err == nil && dimension > 0 && dimension <= 2 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func newsCrawlerFeedsFromEnv() []string {

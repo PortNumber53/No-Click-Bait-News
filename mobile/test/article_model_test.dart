@@ -26,6 +26,7 @@ void main() {
           'bias_label': 'Source imbalance',
           'bias_reasoning_available': true,
           'bias_reasoning_unlocked': false,
+          'image_urls': ['https://example.com/news.jpg'],
         },
       ],
     });
@@ -37,5 +38,6 @@ void main() {
     expect(article.versions.last.biasLabel, 'Source imbalance');
     expect(article.versions.last.biasReasoningAvailable, isTrue);
     expect(article.versions.last.biasReasoningUnlocked, isFalse);
+    expect(article.versions.last.imageUrls, ['https://example.com/news.jpg']);
   });
 }

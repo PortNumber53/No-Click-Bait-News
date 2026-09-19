@@ -144,6 +144,7 @@ flutter run
 - **60 Reads plan** with 60 standard article grants per calendar month for $9.99/month
 - **Unlimited paid reading**, premium stories, and Stripe-hosted billing management
 - **AI bias checks** with labels visible to everyone, explanations included with paid plans, and five explanation unlocks per day on Free
+- **Grounded article imagery** selected by the rewrite agents from publisher-provided RSS and article images, with unapproved URLs discarded
 - **Instant reopening** from a user-scoped local cache for active seven-day article grants
 - **Dark mode** support
 - **Material 3** design system

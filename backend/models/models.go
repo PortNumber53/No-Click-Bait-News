@@ -153,6 +153,7 @@ type RewriteVersion struct {
 	BiasReasoning          *string   `json:"bias_reasoning,omitempty"`
 	BiasReasoningAvailable bool      `json:"bias_reasoning_available"`
 	BiasReasoningUnlocked  bool      `json:"bias_reasoning_unlocked"`
+	ImageURLs              []string  `json:"image_urls"`
 }
 
 type BiasReasoningResponse struct {

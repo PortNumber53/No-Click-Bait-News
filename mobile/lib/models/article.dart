@@ -9,6 +9,7 @@ class ArticleVersion {
   final String? biasReasoning;
   final bool biasReasoningAvailable;
   final bool biasReasoningUnlocked;
+  final List<String> imageUrls;
 
   const ArticleVersion({
     required this.modelName,
@@ -21,6 +22,7 @@ class ArticleVersion {
     this.biasReasoning,
     this.biasReasoningAvailable = false,
     this.biasReasoningUnlocked = false,
+    this.imageUrls = const [],
   });
 
   ArticleVersion copyWith({
@@ -42,6 +44,7 @@ class ArticleVersion {
           biasReasoningAvailable ?? this.biasReasoningAvailable,
       biasReasoningUnlocked:
           biasReasoningUnlocked ?? this.biasReasoningUnlocked,
+      imageUrls: imageUrls,
     );
   }
 }
@@ -133,6 +136,10 @@ class Article {
               version['bias_reasoning_available'] as bool? ?? false,
           biasReasoningUnlocked:
               version['bias_reasoning_unlocked'] as bool? ?? false,
+          imageUrls: (version['image_urls'] as List<dynamic>?)
+                  ?.map((value) => value.toString())
+                  .toList() ??
+              const [],
         );
       }),
     ];

@@ -64,6 +64,18 @@ export function ComparisonCard({ comparison, showContent = false }: Props) {
         <span className="comparison__version-label">Version {key.toUpperCase()}</span>
         <h4 className="comparison__version-title">{version.title}</h4>
         <p className="comparison__version-summary">{version.summary}</p>
+        {version.image_urls?.length > 0 && (
+          <div className="comparison__version-images">
+            {version.image_urls.map(imageUrl => (
+              <img
+                key={imageUrl}
+                src={imageUrl}
+                alt={`Related image selected for Version ${key.toUpperCase()}`}
+                loading="lazy"
+              />
+            ))}
+          </div>
+        )}
         {showContent && version.content && (
           <p className="comparison__version-content">{version.content}</p>
         )}

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/xml"
 	"net/url"
 	"reflect"
 	"testing"
@@ -39,5 +40,67 @@ func TestDefaultNewsCrawlerFeedsAreUniqueHTTPSURLs(t *testing.T) {
 			t.Fatalf("duplicate feed URL %q", raw)
 		}
 		seen[raw] = true
+	}
+}
+
+func TestRSSItemImageURLsUsesOnlyDistinctHTTPImages(t *testing.T) {
+	item := rssItem{
+		Image: "https://cdn.example/hero.jpg",
+		MediaContent: []rssMediaImage{
+			{URL: "https://cdn.example/second.webp", Type: "image/webp"},
+			{URL: "https://cdn.example/video.mp4", Type: "video/mp4"},
+		},
+		Enclosures: []rssEnclosure{
+			{URL: "https://cdn.example/third.png", Type: "image/png"},
+		},
+		Description: `<img src="https://cdn.example/pixel.gif"><img src="https://cdn.example/fourth.jpg"><img src="javascript:alert(1)">`,
+	}
+
+	got := rssItemImageURLs(item)
+	want := []string{
+		"https://cdn.example/hero.jpg",
+		"https://cdn.example/second.webp",
+		"https://cdn.example/third.png",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("image URLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestArticleImageURLsFromTextReadsHTMLAndMarkdown(t *testing.T) {
+	got := ArticleImageURLsFromText(`
+		<img src="https://cdn.example/hero.jpg">
+		![A related chart](https://cdn.example/chart.webp "Chart")
+		![Tracking](https://cdn.example/tracking/pixel.gif)
+	`)
+	want := []string{
+		"https://cdn.example/hero.jpg",
+		"https://cdn.example/chart.webp",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("image URLs = %#v, want %#v", got, want)
+	}
+}
+
+func TestRSSMediaNamespaceImageIsDecoded(t *testing.T) {
+	var feed rssFeed
+	err := xml.Unmarshal([]byte(`
+		<rss xmlns:media="http://search.yahoo.com/mrss/">
+			<channel><item>
+				<title>Story</title>
+				<link>https://example.com/story</link>
+				<media:content url="https://cdn.example/story.jpg" medium="image" />
+			</item></channel>
+		</rss>`), &feed)
+	if err != nil {
+		t.Fatalf("decode RSS: %v", err)
+	}
+	if len(feed.Channel.Items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(feed.Channel.Items))
+	}
+	got := rssItemImageURLs(feed.Channel.Items[0])
+	want := []string{"https://cdn.example/story.jpg"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("image URLs = %#v, want %#v", got, want)
 	}
 }

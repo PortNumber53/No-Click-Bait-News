@@ -87,6 +87,7 @@ var schemaDDL = []string{
 		source_name VARCHAR NOT NULL,
 		source_url VARCHAR NOT NULL,
 		image_url VARCHAR,
+		image_candidates TEXT[],
 		category VARCHAR,
 		categories TEXT[],
 		published_at TIMESTAMPTZ NOT NULL,
@@ -99,6 +100,7 @@ var schemaDDL = []string{
 	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS llm_rewrite_version INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS submitted_by_user_id UUID REFERENCES users(id)`,
 	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS categories TEXT[]`,
+	`ALTER TABLE articles ADD COLUMN IF NOT EXISTS image_candidates TEXT[]`,
 	`UPDATE articles
 	 SET categories = ARRAY[category]
 	 WHERE categories IS NULL AND category IS NOT NULL AND category <> ''`,
@@ -218,6 +220,7 @@ var schemaDDL = []string{
 		rewritten_title VARCHAR NOT NULL,
 		rewritten_summary TEXT NOT NULL,
 		rewritten_content TEXT,
+		image_urls TEXT[],
 		processing_status VARCHAR NOT NULL DEFAULT 'pending',
 		error_message TEXT,
 		prompt_tokens INTEGER,
@@ -227,6 +230,7 @@ var schemaDDL = []string{
 	)`,
 	`ALTER TABLE article_rewrites ADD COLUMN IF NOT EXISTS bias_label VARCHAR`,
 	`ALTER TABLE article_rewrites ADD COLUMN IF NOT EXISTS bias_reasoning TEXT`,
+	`ALTER TABLE article_rewrites ADD COLUMN IF NOT EXISTS image_urls TEXT[]`,
 	`CREATE TABLE IF NOT EXISTS user_bias_reasoning_reads (
 		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 		rewrite_id UUID NOT NULL REFERENCES article_rewrites(id) ON DELETE CASCADE,

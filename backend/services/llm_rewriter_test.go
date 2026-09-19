@@ -52,7 +52,7 @@ func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 			"choices": [{
 				"message": {
 					"role": "assistant",
-					"content": "{\"content\":\"# Direct headline\\n\\nConcise rewritten content.\",\"categories\":[\"Business\",\"Technology\",\"Opinion\"],\"bias_label\":\"No clear bias\",\"bias_reasoning\":\"The article uses attributed factual language.\"}"
+					"content": "{\"content\":\"# Direct headline\\n\\nConcise rewritten content.\",\"categories\":[\"Business\",\"Technology\",\"Opinion\"],\"bias_label\":\"No clear bias\",\"bias_reasoning\":\"The article uses attributed factual language.\",\"image_urls\":[\"https://example.com/news.jpg\"]}"
 				}
 			}]
 		}`))
@@ -60,7 +60,7 @@ func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 	defer server.Close()
 
 	rewriter := NewArticleRewriter("test-key", server.URL, "test-model", 0.1, 500, server.Client())
-	rewrite, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "# Original")
+	rewrite, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "# Original", []string{"https://example.com/news.jpg"})
 	if err != nil {
 		t.Fatalf("RewriteArticle returned error: %v", err)
 	}
@@ -70,10 +70,13 @@ func TestArticleRewriterUsesChatCompletionsCompatibleRequest(t *testing.T) {
 	if got, want := strings.Join(rewrite.Categories, ","), "Business,Technology"; got != want {
 		t.Fatalf("categories = %q, want %q", got, want)
 	}
+	if got := strings.Join(rewrite.ImageURLs, ","); got != "https://example.com/news.jpg" {
+		t.Fatalf("image URLs = %q, want approved candidate", got)
+	}
 }
 
 func TestParseArticleRewriteResultStripsMarkdownFenceAndNormalizesCategories(t *testing.T) {
-	rewrite, err := parseArticleRewriteResult("```json\n{\"content\":\"Body\",\"categories\":[\" technology \",\"TECHNOLOGY\",\"World\"],\"bias_label\":\"source imbalance\",\"bias_reasoning\":\"Only one source is quoted.\"}\n```")
+	rewrite, err := parseArticleRewriteResult("```json\n{\"content\":\"Body\",\"categories\":[\" technology \",\"TECHNOLOGY\",\"World\"],\"bias_label\":\"source imbalance\",\"bias_reasoning\":\"Only one source is quoted.\"}\n```", nil)
 	if err != nil {
 		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
 	}
@@ -96,7 +99,7 @@ func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
 		"categories":["World"],
 		"bias_label":"Loaded or sensational framing",
 		"bias_reasoning":"<p>The headline uses <strong>emotionally loaded</strong> wording.</p>"
-	}`)
+	}`, nil)
 	if err != nil {
 		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
 	}
@@ -118,9 +121,25 @@ func TestParseArticleRewriteResultRemovesHTMLMarkup(t *testing.T) {
 }
 
 func TestParseArticleRewriteResultRequiresBiasAssessment(t *testing.T) {
-	_, err := parseArticleRewriteResult(`{"content":"Body","categories":["World"]}`)
+	_, err := parseArticleRewriteResult(`{"content":"Body","categories":["World"]}`, nil)
 	if err == nil || !strings.Contains(err.Error(), "bias label") {
 		t.Fatalf("error = %v, want missing bias label error", err)
+	}
+}
+
+func TestParseArticleRewriteResultRejectsUnapprovedImages(t *testing.T) {
+	rewrite, err := parseArticleRewriteResult(`{
+		"content":"Body",
+		"categories":["World"],
+		"bias_label":"No clear bias",
+		"bias_reasoning":"The claims are attributed.",
+		"image_urls":["https://example.com/approved.jpg","https://tracker.example/pixel.gif","https://example.com/approved.jpg"]
+	}`, []string{"https://example.com/approved.jpg", "https://tracker.example/pixel.gif"})
+	if err != nil {
+		t.Fatalf("parseArticleRewriteResult returned error: %v", err)
+	}
+	if got := strings.Join(rewrite.ImageURLs, ","); got != "https://example.com/approved.jpg" {
+		t.Fatalf("approved images = %q", got)
 	}
 }
 
@@ -199,7 +218,7 @@ func TestArticleRewriterReturnsTyped429AndOpensSharedCircuit(t *testing.T) {
 	})}
 	rewriter := newArticleRewriter(control, "https://provider.example/v1", "model-a", 0.2, 500, client)
 
-	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original")
+	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original", nil)
 	providerErr, ok := IsLLMRateLimitError(err)
 	if !ok {
 		t.Fatalf("error = %v, want typed rate limit error", err)
@@ -210,7 +229,7 @@ func TestArticleRewriterReturnsTyped429AndOpensSharedCircuit(t *testing.T) {
 	if _, wait := control.tryReserveJobStart(now); wait != 2*time.Minute {
 		t.Fatalf("shared circuit wait = %s, want 2m", wait)
 	}
-	_, err = rewriter.RewriteArticle(context.Background(), "Another title", "https://example.com/other", "Original")
+	_, err = rewriter.RewriteArticle(context.Background(), "Another title", "https://example.com/other", "Original", nil)
 	providerErr, ok = IsLLMRateLimitError(err)
 	if !ok || providerErr.KeySlot != 0 || !providerErr.RetryAt.Equal(now.Add(2*time.Minute)) {
 		t.Fatalf("open-circuit error = %#v, %v", providerErr, err)
@@ -226,7 +245,7 @@ func TestArticleRewriterTransportErrorDoesNotOpenCircuit(t *testing.T) {
 	})}
 	rewriter := newArticleRewriter(control, "https://provider.example/v1", "model-a", 0.2, 500, client)
 
-	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original")
+	_, err := rewriter.RewriteArticle(context.Background(), "Title", "https://example.com/story", "Original", nil)
 	if err == nil || !strings.Contains(err.Error(), "network unavailable") {
 		t.Fatalf("error = %v, want transport error", err)
 	}
