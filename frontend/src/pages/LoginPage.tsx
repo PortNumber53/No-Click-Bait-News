@@ -7,10 +7,11 @@ export function LoginPage() {
   const { login, isLoading, error, clearError } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    login(email.trim(), password);
+    login(email.trim(), password, rememberMe);
   };
 
   return (
@@ -43,6 +44,18 @@ export function LoginPage() {
             required
             minLength={8}
           />
+        </label>
+
+        <label className="auth-form__remember">
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={event => setRememberMe(event.target.checked)}
+          />
+          <span>
+            <strong>Remember me</strong>
+            <small>Keep this account signed in on this device</small>
+          </span>
         </label>
 
         <button type="submit" className="btn btn--filled auth-form__submit" disabled={isLoading}>

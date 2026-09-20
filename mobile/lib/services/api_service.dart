@@ -8,16 +8,26 @@ class ApiService {
     defaultValue: 'https://ncbnews.truvis.co/api/v1',
   );
   static const _storage = FlutterSecureStorage();
+  static String? _sessionToken;
 
   static Future<String?> _getToken() async {
-    return await _storage.read(key: 'access_token');
+    return _sessionToken ?? await _storage.read(key: 'access_token');
   }
 
-  static Future<void> saveToken(String token) async {
-    await _storage.write(key: 'access_token', value: token);
+  static Future<void> saveToken(
+    String token, {
+    bool remember = true,
+  }) async {
+    _sessionToken = token;
+    if (remember) {
+      await _storage.write(key: 'access_token', value: token);
+    } else {
+      await _storage.delete(key: 'access_token');
+    }
   }
 
   static Future<void> clearToken() async {
+    _sessionToken = null;
     await _storage.delete(key: 'access_token');
   }
 
@@ -48,11 +58,18 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> login(
-      String email, String password) async {
+    String email,
+    String password, {
+    bool rememberMe = false,
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/auth/login'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'password': password}),
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+        'remember_me': rememberMe,
+      }),
     );
     if (response.statusCode == 200) {
       return jsonDecode(response.body);

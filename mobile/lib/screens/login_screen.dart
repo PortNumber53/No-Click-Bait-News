@@ -15,6 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _rememberMe = false;
 
   @override
   void dispose() {
@@ -29,6 +30,7 @@ class _LoginScreenState extends State<LoginScreen> {
     await auth.login(
       _emailController.text.trim(),
       _passwordController.text,
+      rememberMe: _rememberMe,
     );
   }
 
@@ -106,6 +108,18 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (v) =>
                         v != null && v.length >= 8 ? null : 'Min 8 characters',
+                  ),
+                  CheckboxListTile(
+                    value: _rememberMe,
+                    onChanged: (value) => setState(
+                      () => _rememberMe = value ?? false,
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Remember me'),
+                    subtitle: const Text(
+                      'Keep this account signed in on this device',
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Consumer<AuthProvider>(

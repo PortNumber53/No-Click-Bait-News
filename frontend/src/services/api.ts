@@ -1,9 +1,10 @@
 import type { Article, ArticleFeed, AuthResponse, BiasReasoningResponse, ComparisonData, SubscriptionTier, User, VoteStats } from '../types';
+import { clearStoredAuth, getStoredToken } from './authStorage';
 
 const API_BASE = '/api/v1';
 
 function getToken(): string | null {
-  return localStorage.getItem('access_token');
+  return getStoredToken();
 }
 
 function headers(auth = false): Record<string, string> {
@@ -19,8 +20,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
+      clearStoredAuth();
       window.dispatchEvent(new Event('auth:unauthorized'));
     }
     const body = await res.json().catch(() => ({ detail: res.statusText }));
@@ -38,11 +38,11 @@ export class ApiError extends Error {
 }
 
 export const api = {
-  login(email: string, password: string) {
+  login(email: string, password: string, rememberMe = false) {
     return request<AuthResponse>(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, remember_me: rememberMe }),
     });
   },
 

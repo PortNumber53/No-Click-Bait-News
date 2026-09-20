@@ -49,13 +49,24 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(
+    String email,
+    String password, {
+    bool rememberMe = false,
+  }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
     try {
-      final data = await ApiService.login(email, password);
-      await ApiService.saveToken(data['access_token']);
+      final data = await ApiService.login(
+        email,
+        password,
+        rememberMe: rememberMe,
+      );
+      await ApiService.saveToken(
+        data['access_token'],
+        remember: rememberMe,
+      );
       _user = User.fromJson(data['user']);
       unawaited(ArticleAccessCache.warm(_user!.id));
       return true;

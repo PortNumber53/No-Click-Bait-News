@@ -6,7 +6,7 @@ export interface AuthState {
   isLoading: boolean;
   error: string | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe: boolean) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;

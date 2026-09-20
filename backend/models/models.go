@@ -68,8 +68,9 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+	RememberMe bool   `json:"remember_me"`
 }
 
 type FetchArticleRequest struct {

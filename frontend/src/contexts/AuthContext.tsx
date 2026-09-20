@@ -2,38 +2,22 @@ import { useState, useCallback, useEffect, type ReactNode } from 'react';
 import { api, ApiError } from '../services/api';
 import type { User } from '../types';
 import { AuthContext } from './auth-context';
-
-function loadStoredUser(): User | null {
-  const stored = localStorage.getItem('user');
-  if (!stored) return null;
-  try {
-    return JSON.parse(stored) as User;
-  } catch {
-    localStorage.removeItem('user');
-    localStorage.removeItem('access_token');
-    return null;
-  }
-}
+import { clearStoredAuth, getStoredToken, getStoredUser, storeAuthSession, updateStoredUser } from '../services/authStorage';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(loadStoredUser);
+  const [user, setUser] = useState<User | null>(getStoredUser);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isAuthenticated = user !== null && !!localStorage.getItem('access_token');
+  const isAuthenticated = user !== null && !!getStoredToken();
 
   useEffect(() => {
-    if (user) {
-      localStorage.setItem('user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('user');
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!localStorage.getItem('access_token')) return;
-    api.getMe().then(setUser).catch(() => {
-      localStorage.removeItem('access_token');
+    if (!getStoredToken()) return;
+    api.getMe().then(currentUser => {
+      updateStoredUser(currentUser);
+      setUser(currentUser);
+    }).catch(() => {
+      clearStoredAuth();
       setUser(null);
     });
   }, []);
@@ -44,12 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, rememberMe: boolean) => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.login(email, password);
-      localStorage.setItem('access_token', data.access_token);
+      const data = await api.login(email, password, rememberMe);
+      storeAuthSession(data.access_token, data.user, rememberMe);
       setUser(data.user);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Login failed');
@@ -63,7 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const data = await api.register(email, password, name);
-      localStorage.setItem('access_token', data.access_token);
+      // Account creation keeps the existing persistent-session behavior. The
+      // explicit choice is available on subsequent sign-ins.
+      storeAuthSession(data.access_token, data.user, true);
       setUser(data.user);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Registration failed');
@@ -73,8 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user');
+    clearStoredAuth();
     setUser(null);
   }, []);
 

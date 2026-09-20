@@ -14,6 +14,11 @@ import (
 	"github.com/PortNumber53/no-click-bait-news/backend/models"
 )
 
+const (
+	standardSessionLifetime   = 7 * 24 * time.Hour
+	rememberedSessionLifetime = 30 * 24 * time.Hour
+)
+
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req models.RegisterRequest
 	if !DecodeJSON(w, r, &req) {
@@ -92,7 +97,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.createToken(userID)
+	token, err := h.createToken(userID, false)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to create token")
 		return
@@ -139,7 +144,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.createToken(user.ID)
+	token, err := h.createToken(user.ID, req.RememberMe)
 	if err != nil {
 		Error(w, http.StatusInternalServerError, "Failed to create token")
 		return
@@ -185,12 +190,17 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) createToken(userID uuid.UUID) (string, error) {
+func (h *Handler) createToken(userID uuid.UUID, rememberMe bool) (string, error) {
+	lifetime := standardSessionLifetime
+	if rememberMe {
+		lifetime = rememberedSessionLifetime
+	}
+	now := time.Now()
 	claims := jwt.MapClaims{
 		"sub": userID.String(),
 		"iss": "no-click-bait-news",
-		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"iat": now.Unix(),
+		"exp": now.Add(lifetime).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(h.jwtSecret)
